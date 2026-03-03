@@ -14,7 +14,10 @@ warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality isn't 
 
 import json
 import logging
+import subprocess
 import sys
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +29,60 @@ load_dotenv()
 
 from .config import load_user_config
 from .llm import get_llm_info, get_llm, invoke_with_timeout, LLMTimeoutError, get_llm_timeout
+
+
+_ALCF_AUTH_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/argonne-lcf/inference-endpoints/"
+    "refs/heads/main/inference_auth_token.py"
+)
+
+
+def _alcf_authenticate() -> bool:
+    """Download the ALCF auth helper and run ``authenticate``.
+
+    Returns True if the script appeared to succeed.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        script = Path(tmp) / "inference_auth_token.py"
+        click.echo()
+        click.echo("    Downloading inference_auth_token.py …", nl=False)
+        try:
+            urllib.request.urlretrieve(_ALCF_AUTH_SCRIPT_URL, script)
+            click.echo(click.style(" done", fg="green"))
+        except Exception as exc:
+            click.echo(click.style(f" failed: {exc}", fg="red"))
+            return False
+
+        click.echo("    Launching Globus authentication (a browser window may open)…")
+        click.echo()
+        result = subprocess.run(
+            [sys.executable, str(script), "authenticate"],
+        )
+        if result.returncode != 0:
+            click.echo()
+            click.echo(click.style("    Authentication script exited with an error.", fg="red"))
+            return False
+
+        click.echo()
+        click.echo(click.style("    ✓ Authentication complete.", fg="green"))
+        click.echo("    You can now obtain a token by running:")
+        click.echo(f"      python {script.name} get_access_token")
+        click.echo("    or set ALCF_ACCESS_TOKEN in your environment.")
+        return True
+
+
+def _show_alcf_auth_hint(*, offer_fix: bool = False) -> None:
+    """Print ALCF authentication instructions, optionally offering to run them."""
+    if offer_fix:
+        if click.confirm("    Download and run the ALCF auth script now?", default=True):
+            _alcf_authenticate()
+            return
+
+    click.echo("      # Download the authentication helper script")
+    click.echo(f"      wget {_ALCF_AUTH_SCRIPT_URL}")
+    click.echo()
+    click.echo("      # Authenticate with your Globus account")
+    click.echo("      python inference_auth_token.py authenticate")
 
 
 def _check_llm_status(quiet: bool = False, test_connection: bool = True) -> tuple[bool, str]:
@@ -137,13 +194,18 @@ def cli():
 @cli.command("check-llm")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.option("--no-test", is_flag=True, help="Skip the live connection test")
-def check_llm(output_json: bool, no_test: bool):
+@click.option("--fix", is_flag=True, help="Attempt to fix issues (e.g. download ALCF auth script)")
+def check_llm(output_json: bool, no_test: bool, fix: bool):
     """
     Check LLM configuration and connectivity.
 
     Shows which provider and model are configured, whether credentials
     are present, and (unless --no-test) sends a tiny test prompt to
     verify the connection works end-to-end.
+
+    Use --fix to automatically download and run the ALCF authentication
+    helper when the provider is 'alcf' and credentials are missing or
+    expired.
 
     \b
     Environment variables used:
@@ -159,6 +221,7 @@ def check_llm(output_json: bool, no_test: bool):
         aure check-llm
         aure check-llm --json
         aure check-llm --no-test
+        aure check-llm --fix
     """
     from .llm.config import get_llm_config
 
@@ -197,7 +260,14 @@ def check_llm(output_json: bool, no_test: bool):
     if not info["available"]:
         click.echo(click.style("  ✗ LLM not available", fg="red", bold=True))
         click.echo()
-        if config["provider"] in ("openai", "gemini") and not has_key:
+        if config["provider"] == "alcf" and not has_key:
+            click.echo("    Authenticate with ALCF to obtain an access token:")
+            click.echo()
+            _show_alcf_auth_hint(offer_fix=fix)
+            click.echo()
+            click.echo("    Then set the token:")
+            click.echo("      export ALCF_ACCESS_TOKEN=<your-token>")
+        elif config["provider"] in ("openai", "gemini") and not has_key:
             click.echo("    Set an API key:")
             click.echo(f"      export LLM_API_KEY=<your-key>")
             click.echo(f"    or add to .env:")
@@ -220,6 +290,11 @@ def check_llm(output_json: bool, no_test: bool):
         click.echo(click.style(" ✓ Connected", fg="green"))
     else:
         click.echo(click.style(f" ✗ {msg}", fg="red"))
+        if config["provider"] == "alcf":
+            click.echo()
+            click.echo(click.style("    ALCF tokens expire periodically. Re-authenticate:", fg="yellow"))
+            click.echo()
+            _show_alcf_auth_hint(offer_fix=fix)
     click.echo()
     sys.exit(0 if ok else 1)
 

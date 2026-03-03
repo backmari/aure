@@ -131,5 +131,7 @@ def _get_token() -> str:
     raise RuntimeError(
         "Could not obtain ALCF access token. Set ALCF_ACCESS_TOKEN, "
         "install globus_sdk (pip install aure[alcf]) and authenticate, "
-        "or place inference_auth_token.py on PATH."
+        "or download the auth script:\n"
+        "  wget https://raw.githubusercontent.com/argonne-lcf/inference-endpoints/refs/heads/main/inference_auth_token.py\n"
+        "  python inference_auth_token.py authenticate"
     )

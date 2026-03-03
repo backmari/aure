@@ -199,6 +199,12 @@ class CheckpointManager:
         except Exception as exc:
             logger.warning("[CHECKPOINT] Could not write model_final.py: %s", exc)
 
+        # Copy the best-fit problem.json to the top-level output directory
+        try:
+            self._copy_best_problem_json(state)
+        except Exception as exc:
+            logger.warning("[CHECKPOINT] Could not copy best problem.json: %s", exc)
+
     # ------------------------------------------------------------------
     # Final model with fitted parameters
     # ------------------------------------------------------------------
@@ -252,6 +258,47 @@ class CheckpointManager:
         out_path = self.models_dir / "model_final.py"
         out_path.write_text(script)
         logger.info(f"[CHECKPOINT] Saved final model: {out_path}")
+
+    def _copy_best_problem_json(self, state: Dict[str, Any]):
+        """Copy ``problem.json`` from the best fit's refl1d output to the
+        top-level output directory.
+
+        Locates the fit iteration that produced the best chi-squared, finds
+        the corresponding ``refl1d_output/fit_iter{N}_{method}/problem.json``,
+        and copies it to ``<output_dir>/problem.json``.
+        """
+        import shutil
+
+        fit_results = state.get("fit_results") or []
+        if not fit_results:
+            return
+
+        best_chi2 = state.get("best_chi2")
+        if best_chi2 is None:
+            return
+
+        # Find the fit result that matches best_chi2
+        best_fit = None
+        for fr in fit_results:
+            if fr.get("chi_squared") == best_chi2:
+                best_fit = fr
+                break
+
+        # Fallback: pick the fit with the lowest chi_squared
+        if best_fit is None:
+            best_fit = min(fit_results, key=lambda f: f.get("chi_squared", float("inf")))
+
+        iteration = best_fit.get("iteration", 0)
+        method = best_fit.get("method", "dream")
+
+        src = self.refl1d_output_dir / f"fit_iter{iteration}_{method}" / "problem.json"
+        if not src.exists():
+            logger.warning("[CHECKPOINT] Best-fit problem.json not found: %s", src)
+            return
+
+        dst = self.output_dir / "problem.json"
+        shutil.copy2(src, dst)
+        logger.info(f"[CHECKPOINT] Copied best-fit problem.json → {dst}")
 
     @staticmethod
     def _patch_model_parameters(script: str, params: dict) -> str:
