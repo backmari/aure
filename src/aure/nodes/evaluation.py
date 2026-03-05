@@ -12,11 +12,12 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from langchain_core.messages import HumanMessage
 
-from ..state import ReflectivityState, FitResult, Message
+from ..state import ReflectivityState, FitResult, Message, LLMCallRecord
 from ..llm import llm_available, get_llm
 from ..config import format_user_criteria
 from .prompts import format_fit_evaluation_prompt
@@ -47,6 +48,7 @@ def evaluation_node(state: ReflectivityState) -> Dict[str, Any]:
         "current_node": "evaluation",
         "messages": [],
         "iteration": iteration,
+        "llm_calls": [],
     }
     
     logger.info(f"[EVALUATION] Iteration {iteration} - Analyzing fit quality")
@@ -77,6 +79,15 @@ def evaluation_node(state: ReflectivityState) -> Dict[str, Any]:
             chi2_max=chi2_max,
             user_criteria=user_criteria,
         )
+        used_fallback = analysis.pop("_used_fallback", False)
+        updates["llm_calls"].append(LLMCallRecord(
+            node="evaluation",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            success=True,
+            used_fallback=used_fallback,
+            fallback_reason="LLM response could not be parsed; used heuristic evaluation" if used_fallback else None,
+            error=None,
+        ))
     except Exception as e:
         error_msg = str(e).lower()
         if "quota" in error_msg or "rate" in error_msg or "limit" in error_msg or "429" in str(e):
@@ -84,6 +95,14 @@ def evaluation_node(state: ReflectivityState) -> Dict[str, Any]:
         else:
             updates["error"] = f"LLM call failed: {str(e)[:200]}"
         logger.error(f"[EVALUATION] LLM error: {e}")
+        updates["llm_calls"].append(LLMCallRecord(
+            node="evaluation",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            success=False,
+            used_fallback=False,
+            fallback_reason=None,
+            error=str(e)[:200],
+        ))
         return updates
     
     # Update fit result with issues and suggestions
@@ -179,12 +198,15 @@ def analyze_fit_quality_with_llm(
                 "hypothesis_addressed": result.get("hypothesis_addressed", ""),
                 "needs_user_guidance": result.get("needs_user_guidance", False),
                 "chi_squared": fit_result.get("chi_squared", float('inf')),
+                "_used_fallback": False,
             }
         except json.JSONDecodeError:
             logger.warning("[EVALUATION] Failed to parse LLM JSON response")
     
     # Fallback if LLM response can't be parsed
-    return _simple_evaluation(fit_result)
+    fallback = _simple_evaluation(fit_result)
+    fallback["_used_fallback"] = True
+    return fallback
 
 
 def _simple_evaluation(fit_result: FitResult) -> Dict[str, Any]:

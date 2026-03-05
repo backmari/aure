@@ -96,6 +96,16 @@ class FitResult(TypedDict):
     suggestions: List[str]
 
 
+class LLMCallRecord(TypedDict):
+    """Record of a single LLM invocation during the workflow."""
+    node: str                    # Which workflow node made the call
+    timestamp: Optional[str]
+    success: bool                # Did the LLM call itself succeed?
+    used_fallback: bool          # Was a default/heuristic used instead of LLM output?
+    fallback_reason: Optional[str]  # Why the fallback was needed
+    error: Optional[str]         # Error message if the call failed
+
+
 class Message(TypedDict):
     """A message in the conversation."""
     role: str  # 'user', 'assistant', 'system'
@@ -137,6 +147,9 @@ class ReflectivityState(TypedDict):
     
     # ========== Conversation ==========
     messages: Annotated[List[Message], operator.add]
+    
+    # ========== LLM Call Tracking ==========
+    llm_calls: Annotated[List[LLMCallRecord], operator.add]
     
     # ========== Workflow Control ==========
     current_node: str
@@ -195,6 +208,9 @@ def create_initial_state(
         
         # Conversation
         messages=[],
+        
+        # LLM call tracking
+        llm_calls=[],
         
         # Workflow control
         current_node='intake',

@@ -9,9 +9,10 @@ This is the first node in the workflow. It:
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Dict, Any
 
-from ..state import ReflectivityState, Message
+from ..state import ReflectivityState, Message, LLMCallRecord
 from ..tools.data_tools import load_reflectivity_data, validate_reflectivity_data
 from ..llm import llm_available, get_llm, invoke_with_timeout
 from .prompts import format_sample_parse_prompt
@@ -68,6 +69,7 @@ def intake_node(state: ReflectivityState) -> Dict[str, Any]:
     updates = {
         "current_node": "intake",
         "messages": [],
+        "llm_calls": [],
     }
     
     # ========== 1. Load Data ==========
@@ -107,6 +109,14 @@ def intake_node(state: ReflectivityState) -> Dict[str, Any]:
                 hypothesis=state.get("hypothesis")
             )
             updates["parsed_sample"] = parsed
+            updates["llm_calls"].append(LLMCallRecord(
+                node="intake",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                success=True,
+                used_fallback=False,
+                fallback_reason=None,
+                error=None,
+            ))
             
             # Add confirmation message
             updates["messages"].append(Message(
@@ -117,6 +127,14 @@ def intake_node(state: ReflectivityState) -> Dict[str, Any]:
             
         except Exception as e:
             # Non-fatal - we can still proceed with feature extraction
+            updates["llm_calls"].append(LLMCallRecord(
+                node="intake",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                success=False,
+                used_fallback=True,
+                fallback_reason="Proceeding with feature extraction only",
+                error=str(e)[:200],
+            ))
             updates["messages"].append(Message(
                 role="system",
                 content=f"Could not parse sample description: {str(e)}. Will rely on feature extraction.",

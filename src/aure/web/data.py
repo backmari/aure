@@ -107,15 +107,20 @@ class RunData:
         """
         Walk checkpoints and return one entry per step.
 
-        Each entry: ``{step, node, iteration, chi2, timestamp}``.
+        Each entry: ``{step, node, iteration, chi2, timestamp, error, llm_calls}``.
         ``chi2`` is ``None`` for nodes that don't produce a fit.
+        ``llm_calls`` lists LLM records added during that step.
         """
         cps = self._load_all_checkpoints()
         result: List[dict] = []
+        prev_llm_count = 0
 
         for i, cp in enumerate(cps):
             state = cp.get("state", {})
             info = cp.get("_info", {})
+            all_llm = state.get("llm_calls", [])
+            step_llm = all_llm[prev_llm_count:]
+            prev_llm_count = len(all_llm)
             result.append(
                 {
                     "step": i + 1,
@@ -124,10 +129,45 @@ class RunData:
                     "chi2": state.get("current_chi2"),
                     "timestamp": info.get("timestamp", cp.get("timestamp")),
                     "error": state.get("error"),
+                    "llm_calls": step_llm,
                 }
             )
 
         return result
+
+    # ------------------------------------------------------------------
+    # LLM call summary
+    # ------------------------------------------------------------------
+
+    def get_llm_summary(self) -> dict:
+        """
+        Return aggregate statistics and individual records for all LLM
+        calls made during the workflow.
+
+        Returns::
+
+            {
+                "total": int,
+                "succeeded": int,
+                "failed": int,
+                "used_fallback": int,
+                "all_ok": bool,
+                "calls": [<LLMCallRecord>, ...],
+            }
+        """
+        state = self.get_final_state()
+        calls: List[dict] = state.get("llm_calls", [])
+        succeeded = sum(1 for c in calls if c.get("success"))
+        failed = len(calls) - succeeded
+        fallback = sum(1 for c in calls if c.get("used_fallback"))
+        return {
+            "total": len(calls),
+            "succeeded": succeeded,
+            "failed": failed,
+            "used_fallback": fallback,
+            "all_ok": failed == 0 and fallback == 0,
+            "calls": calls,
+        }
 
     # ------------------------------------------------------------------
     # Reflectivity data  (experimental + model curves)

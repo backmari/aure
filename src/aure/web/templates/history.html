@@ -32,13 +32,23 @@
 
 <!-- Chi-squared progression chart -->
 <div class="row mb-3">
-  <div class="col">
+  <div class="col-md-8">
     <div class="card">
       <div class="card-header fw-semibold">
         <i class="bi bi-graph-down"></i> χ² Progression
       </div>
       <div class="card-body p-0">
         <div id="chi2-chart" style="height:320px;"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card" id="llm-status-card">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-cpu"></i> LLM Connection Status
+      </div>
+      <div class="card-body text-center" id="llm-status-body">
+        <p class="text-muted">Loading…</p>
       </div>
     </div>
   </div>
@@ -60,6 +70,7 @@
                 <th>Node</th>
                 <th>Iteration</th>
                 <th>χ²</th>
+                <th>LLM</th>
                 <th>Timestamp</th>
                 <th>Status</th>
               </tr>
@@ -76,7 +87,55 @@
 {% block scripts %}
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
-  const data = await (await fetch("/api/chi2")).json();
+  const [data, llmStatus] = await Promise.all([
+    fetch("/api/chi2").then(r => r.json()),
+    fetch("/api/llm-status").then(r => r.json()),
+  ]);
+
+  // ---- LLM status summary card ----
+  const body = document.getElementById("llm-status-body");
+  if (llmStatus.total === 0) {
+    body.innerHTML = '<p class="text-muted mb-0">No LLM calls recorded.</p>';
+  } else {
+    const icon = llmStatus.all_ok
+      ? '<i class="bi bi-check-circle-fill text-success" style="font-size:2rem;"></i>'
+      : llmStatus.failed > 0
+        ? '<i class="bi bi-x-circle-fill text-danger" style="font-size:2rem;"></i>'
+        : '<i class="bi bi-exclamation-triangle-fill text-warning" style="font-size:2rem;"></i>';
+
+    const headline = llmStatus.all_ok
+      ? "All LLM calls succeeded"
+      : llmStatus.failed > 0
+        ? `${llmStatus.failed} of ${llmStatus.total} calls failed`
+        : `${llmStatus.used_fallback} of ${llmStatus.total} used fallback`;
+
+    let detailRows = `<tr><td class="text-start">Succeeded</td><td class="text-end fw-bold">${llmStatus.succeeded}</td></tr>`;
+    if (llmStatus.failed > 0) {
+      detailRows += `<tr><td class="text-start">Failed</td><td class="text-end fw-bold text-danger">${llmStatus.failed}</td></tr>`;
+    }
+    if (llmStatus.used_fallback > 0) {
+      detailRows += `<tr><td class="text-start">Fallback used</td><td class="text-end fw-bold text-warning">${llmStatus.used_fallback}</td></tr>`;
+    }
+
+    body.innerHTML = `
+      <div class="mb-2">${icon}</div>
+      <p class="fw-semibold mb-2">${headline}</p>
+      <table class="table table-sm table-borderless mb-0" style="max-width:200px;margin:auto;">
+        <tbody>${detailRows}</tbody>
+      </table>`;
+  }
+
+  // ---- Helper: render LLM badge(s) for a step ----
+  function llmBadges(calls) {
+    if (!calls || calls.length === 0) return '<span class="text-muted">—</span>';
+    return calls.map(c => {
+      if (!c.success)
+        return `<span class="badge bg-danger" title="${(c.error || '').replace(/"/g, '&quot;')}">✗ failed</span>`;
+      if (c.used_fallback)
+        return `<span class="badge bg-warning text-dark" title="${(c.fallback_reason || '').replace(/"/g, '&quot;')}">⚠ fallback</span>`;
+      return '<span class="badge bg-success">✓ ok</span>';
+    }).join(" ");
+  }
 
   // ---- Checkpoint table ----
   const tbody = document.getElementById("checkpoint-table-body");
@@ -93,6 +152,7 @@ document.addEventListener("DOMContentLoaded", async () => {
          <td><code>${d.node}</code></td>
          <td>${d.iteration}</td>
          <td>${chi2}</td>
+         <td>${llmBadges(d.llm_calls)}</td>
          <td>${ts}</td>
          <td>${status}</td>
        </tr>`

@@ -14,11 +14,12 @@ regenerate the complete model script based on evaluation feedback.
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from langchain_core.messages import HumanMessage
 
-from ..state import ReflectivityState, Message
+from ..state import ReflectivityState, Message, LLMCallRecord
 from ..database import get_sld
 from ..llm import llm_available, get_llm
 from ..config import format_user_constraints
@@ -62,6 +63,7 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
         "current_node": "modeling",
         "messages": [],
         "model_history": [],
+        "llm_calls": [],
     }
 
     iteration = state.get("iteration", 0)
@@ -110,6 +112,23 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
                 "[MODELING] LLM-generated script missing required components, keeping current model with widened bounds"
             )
             new_model = _widen_all_bounds(current_model)
+            updates["llm_calls"].append(LLMCallRecord(
+                node="modeling",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                success=True,
+                used_fallback=True,
+                fallback_reason="LLM output failed validation; fell back to widened bounds",
+                error=None,
+            ))
+        else:
+            updates["llm_calls"].append(LLMCallRecord(
+                node="modeling",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                success=True,
+                used_fallback=False,
+                fallback_reason=None,
+                error=None,
+            ))
 
         updates["current_model"] = new_model
         updates["model_history"] = [
@@ -146,6 +165,14 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
         else:
             updates["error"] = f"Model refinement failed: {str(e)[:200]}"
         logger.error(f"[MODELING] LLM refinement error: {e}")
+        updates["llm_calls"].append(LLMCallRecord(
+            node="modeling",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            success=False,
+            used_fallback=False,
+            fallback_reason=None,
+            error=str(e)[:200],
+        ))
 
     return updates
 

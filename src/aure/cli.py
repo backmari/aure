@@ -114,10 +114,22 @@ def _check_llm_status(quiet: bool = False, test_connection: bool = True) -> tupl
     if test_connection:
         if not quiet:
             click.echo("    Testing connection...", nl=False)
+        # Suppress noisy provider-level warnings during the test call
+        # (e.g. ALCF globus_sdk fallback messages).
+        _llm_logger = logging.getLogger("aure.llm")
+        _old_level = _llm_logger.level
+        _llm_logger.setLevel(logging.CRITICAL)
         try:
             llm = get_llm()
             # Use timeout to prevent infinite retries on quota errors
-            invoke_with_timeout(llm, "Reply with only the word 'OK'", timeout_seconds=min(30, get_llm_timeout()))
+            response = invoke_with_timeout(llm, "Reply with only the word 'OK'", timeout_seconds=min(30, get_llm_timeout()))
+            # Validate we got a real response back
+            content = getattr(response, "content", None) or ""
+            if not content.strip():
+                msg = "LLM returned an empty response"
+                if not quiet:
+                    click.echo(click.style(f" ✗ {msg}", fg="red"))
+                return False, msg
             if not quiet:
                 click.echo(click.style(" ✓ Connected", fg="green"))
             return True, "LLM connected successfully"
@@ -165,6 +177,8 @@ def _check_llm_status(quiet: bool = False, test_connection: bool = True) -> tupl
                     click.echo(click.style(" ✗ Failed", fg="red"))
                     click.echo(click.style(f"    Error: {error_msg}", fg="red"))
                 return False, f"Connection failed: {error_msg}"
+        finally:
+            _llm_logger.setLevel(_old_level)
     
     if not quiet:
         click.echo(click.style("    Status: ✓ Configured", fg="green"))
@@ -224,6 +238,7 @@ def check_llm(output_json: bool, no_test: bool, fix: bool):
         aure check-llm --fix
     """
     from .llm.config import get_llm_config
+    import os
 
     config = get_llm_config()
     info = get_llm_info()
@@ -248,11 +263,14 @@ def check_llm(output_json: bool, no_test: bool, fix: bool):
     click.echo()
     click.echo(f"    Provider:    {config['provider'] or '(not set)'}")
     click.echo(f"    Model:       {config['model']}")
-    click.echo(f"    API key:     {'••••' + config['api_key'][-4:] if has_key else click.style('NOT SET', fg='red')}")
+    if config["provider"] == "alcf":
+        has_token = bool(os.environ.get("ALCF_ACCESS_TOKEN"))
+        click.echo(f"    Token:       {'••••' + os.environ['ALCF_ACCESS_TOKEN'][-4:] if has_token else click.style('NOT SET', fg='red')}")
+        click.echo(f"    ALCF cluster: {config.get('alcf_cluster', 'sophia')}")
+    else:
+        click.echo(f"    API key:     {'••••' + config['api_key'][-4:] if has_key else click.style('NOT SET', fg='red')}")
     if config.get("base_url"):
         click.echo(f"    Base URL:    {config['base_url']}")
-    if config.get("alcf_cluster"):
-        click.echo(f"    ALCF cluster: {config['alcf_cluster']}")
     click.echo(f"    Timeout:     {get_llm_timeout()}s")
     click.echo(f"    Temperature: {config['temperature']}")
     click.echo()
@@ -260,7 +278,7 @@ def check_llm(output_json: bool, no_test: bool, fix: bool):
     if not info["available"]:
         click.echo(click.style("  ✗ LLM not available", fg="red", bold=True))
         click.echo()
-        if config["provider"] == "alcf" and not has_key:
+        if config["provider"] == "alcf":
             click.echo("    Authenticate with ALCF to obtain an access token:")
             click.echo()
             _show_alcf_auth_hint(offer_fix=fix)
@@ -1706,7 +1724,7 @@ def mcp_server(transport: str, port: int):
 # ============================================================================
 
 @cli.command("serve")
-@click.argument("output_dir", type=click.Path(exists=True))
+@click.argument("output_dir", type=click.Path(exists=True), required=False, default=None)
 @click.option(
     "--port", "-p",
     default=5000,
@@ -1718,13 +1736,14 @@ def mcp_server(transport: str, port: int):
     is_flag=True,
     help="Don't open a browser automatically",
 )
-def serve(output_dir: str, port: int, no_browser: bool):
+def serve(output_dir: Optional[str], port: int, no_browser: bool):
     """
-    Launch a web viewer for workflow results.
+    Launch the AuRE web interface.
 
-    OUTPUT_DIR: Path to the output directory from 'aure analyze -o'
-
-    Opens a local Flask app with two tabs:
+    When OUTPUT_DIR is given the app opens in read-only viewer mode.
+    When omitted it starts in interactive setup mode where you can
+    pick a data file, describe the sample, and launch an analysis
+    from the browser.
 
     \b
       History  – checkpoint timeline and χ² progression chart
@@ -1732,17 +1751,25 @@ def serve(output_dir: str, port: int, no_browser: bool):
 
     Examples:
 
-        aure serve ./output
+        aure serve               # interactive mode
+
+        aure serve ./output      # viewer mode
 
         aure serve ./output --port 8080 --no-browser
     """
     from .web import create_app
 
     click.echo(click.style("═" * 60, fg="blue"))
-    click.echo(click.style("  AuRE – Results Viewer", fg="blue", bold=True))
+    if output_dir:
+        click.echo(click.style("  AuRE – Results Viewer", fg="blue", bold=True))
+    else:
+        click.echo(click.style("  AuRE – Interactive Mode", fg="blue", bold=True))
     click.echo(click.style("═" * 60, fg="blue"))
     click.echo()
-    click.echo(f"  Output dir: {output_dir}")
+    if output_dir:
+        click.echo(f"  Output dir: {output_dir}")
+    else:
+        click.echo("  Mode:       interactive setup")
     click.echo(f"  URL:        http://127.0.0.1:{port}")
     click.echo()
 
@@ -1763,16 +1790,29 @@ def serve(output_dir: str, port: int, no_browser: bool):
 
 @cli.command("interactive")
 @click.argument("data_file", type=click.Path(exists=True), required=False)
-def interactive(data_file: Optional[str]):
+@click.option("--port", "-p", default=5000, type=int, help="Port (default: 5000)")
+def interactive(data_file: Optional[str], port: int):
     """
-    Start an interactive analysis session.
-    
-    [Not yet implemented - placeholder for future REPL mode]
+    Start an interactive analysis session in the browser.
+
+    Alias for ``aure serve`` in interactive setup mode.
     """
+    from .web import create_app
+
+    click.echo(click.style("═" * 60, fg="blue"))
+    click.echo(click.style("  AuRE – Interactive Mode", fg="blue", bold=True))
+    click.echo(click.style("═" * 60, fg="blue"))
     click.echo()
-    click.echo(click.style("  Interactive mode not yet implemented.", fg="yellow"))
-    click.echo("  Use the 'analyze' command or MCP server for now.")
+    click.echo(f"  URL: http://127.0.0.1:{port}")
     click.echo()
+
+    app = create_app()
+
+    import threading
+    import webbrowser
+    threading.Timer(1.0, webbrowser.open, args=[f"http://127.0.0.1:{port}"]).start()
+
+    app.run(host="127.0.0.1", port=port, debug=False)
 
 
 # ============================================================================

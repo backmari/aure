@@ -23,3 +23,24 @@ code {
 .js-plotly-plot .plotly .modebar {
   right: 8px !important;
 }
+
+/* ── Setup / interactive page ─────────────────────────────────── */
+
+/* Spinning gear icon while analysis runs */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-icon {
+  display: inline-block;
+  animation: spin 2s linear infinite;
+}
+
+/* File-browser entries */
+#browser-list .list-group-item {
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+}
+#browser-list .list-group-item:hover {
+  background-color: #f0f4ff;
+}

@@ -74,9 +74,32 @@ def llm_available() -> bool:
     if provider == "local":
         return bool(config["base_url"])
     if provider == "alcf":
-        return True  # token obtained lazily
+        return _alcf_token_available(config)
     # Cloud providers need an API key
     return bool(config["api_key"])
+
+
+def _alcf_token_available(config: dict) -> bool:
+    """Return ``True`` if an ALCF token can be obtained without user interaction."""
+    import logging
+
+    # Explicit env-var is the fast path
+    if os.environ.get("ALCF_ACCESS_TOKEN"):
+        return True
+    # Try to actually obtain a token (lazy methods may have cached one).
+    # Suppress noisy warnings that _get_token emits on each fallback path.
+    try:
+        from .providers.alcf import _get_token
+        alcf_logger = logging.getLogger("aure.llm.providers.alcf")
+        old_level = alcf_logger.level
+        alcf_logger.setLevel(logging.CRITICAL)
+        try:
+            _get_token()
+            return True
+        finally:
+            alcf_logger.setLevel(old_level)
+    except Exception:
+        return False
 
 
 def get_llm_info() -> dict:
