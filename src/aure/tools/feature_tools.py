@@ -23,96 +23,93 @@ import warnings
 def extract_critical_edges(
     Q: np.ndarray,
     R: np.ndarray,
-    prominence: float = 0.5,
     min_qc: float = 0.005,
     max_qc: float = 0.05,
 ) -> List[Dict]:
     """
-    Find critical edge(s) and estimate corresponding SLD(s).
-    
-    The critical edge occurs where R drops sharply from the plateau.
-    For total external reflection: Qc = 4*sqrt(π*SLD)
-    
+    Find the critical edge and estimate the corresponding SLD.
+
+    The critical edge Qc is where total external reflection ends and
+    reflectivity drops from the initial plateau (R ≈ 1) at low Q.
+
+    The search targets the **first sharp drop after the plateau** and
+    excludes any region where Kiessig fringes (oscillations) have already
+    begun.  At most one candidate is returned.
+
+    For total external reflection: Qc = 4·sqrt(π·SLD)
+
     Args:
         Q: Q values (Å⁻¹)
         R: Reflectivity values
-        prominence: Peak prominence for edge detection
-        min_qc: Minimum Qc to consider
-        max_qc: Maximum Qc to consider
-    
+        min_qc: Minimum Qc to consider (Å⁻¹)
+        max_qc: Maximum Qc to consider (Å⁻¹)
+
     Returns:
-        List of dicts with {Qc, estimated_SLD, confidence}
+        List of dicts with {Qc, estimated_SLD, confidence, gradient}
     """
-    # Work in log space for better gradient calculation
-    # Use np.maximum to handle negative R values from background subtraction
     log_R = np.log10(np.maximum(R, 1e-12))
-    
-    # Smooth the data slightly to reduce noise
+
+    # Smooth to reduce noise
     if len(log_R) > 20:
         window = min(11, len(log_R) // 5)
         if window % 2 == 0:
             window += 1
         log_R_smooth = savgol_filter(log_R, window, 3)
     else:
-        log_R_smooth = log_R
-    
-    # Calculate gradient
+        log_R_smooth = log_R.copy()
+
     dlogR_dQ = np.gradient(log_R_smooth, Q)
-    
-    # Find minima in gradient (steepest descent = critical edge)
-    # Only look in reasonable Qc range
-    q_mask = (Q >= min_qc) & (Q <= max_qc)
-    
-    if not np.any(q_mask):
+
+    # --- Upper Q boundary: first fringe trough --------------------------
+    # A fringe trough is a local minimum in log_R_smooth that is followed
+    # by a recovery (what makes find_peaks detect it).  Prominence ≥ 0.1
+    # in log10(R) filters out noise while catching real fringes.
+    # Anything at or after the first fringe cannot be a critical edge.
+    fringe_minima, _ = find_peaks(-log_R_smooth, distance=5, prominence=0.1)
+
+    upper_q = max_qc
+    for mi in fringe_minima:
+        if Q[mi] >= min_qc:
+            upper_q = min(upper_q, Q[mi])
+            break
+
+    # --- Search for the critical edge in [min_qc, upper_q] --------------
+    search_mask = (Q >= min_qc) & (Q <= upper_q)
+    if not np.any(search_mask):
+        # Fallback: use the full Qc range
+        search_mask = (Q >= min_qc) & (Q <= max_qc)
+    if not np.any(search_mask):
         return []
-    
-    # Find peaks in negative gradient (descents)
-    neg_gradient = -dlogR_dQ.copy()
-    neg_gradient[~q_mask] = 0  # Mask out regions outside Qc range
-    
-    peaks, properties = find_peaks(neg_gradient, prominence=prominence)
-    
-    results = []
-    for peak_idx in peaks:
-        qc = Q[peak_idx]
-        
-        # Estimate SLD from Qc: SLD = (Qc/4)² / π × 10⁶
-        sld = (qc / 4)**2 / np.pi * 1e6
-        
-        # Confidence based on how sharp the edge is
-        edge_sharpness = abs(dlogR_dQ[peak_idx])
-        if edge_sharpness > 50:
-            confidence = 'high'
-        elif edge_sharpness > 20:
-            confidence = 'medium'
-        else:
-            confidence = 'low'
-        
-        results.append({
-            'Qc': float(qc),
-            'estimated_SLD': float(sld),
-            'confidence': confidence,
-            'gradient': float(dlogR_dQ[peak_idx]),
-        })
-    
-    # If no peaks found, look for the steepest point
-    if not results:
-        idx_max = np.argmin(dlogR_dQ[q_mask])
-        idx = np.where(q_mask)[0][idx_max]
-        qc = Q[idx]
-        sld = (qc / 4)**2 / np.pi * 1e6
-        
-        results.append({
-            'Qc': float(qc),
-            'estimated_SLD': float(sld),
-            'confidence': 'low',
-            'gradient': float(dlogR_dQ[idx]),
-        })
-    
-    # Sort by Qc
-    results.sort(key=lambda x: x['Qc'])
-    
-    return results
+
+    search_idx = np.where(search_mask)[0]
+    grad_in_region = dlogR_dQ[search_idx]
+
+    # Critical edge = point of steepest descent (most-negative gradient)
+    best_local = np.argmin(grad_in_region)
+    best_idx = search_idx[best_local]
+
+    # If the gradient is barely negative there is no discernible edge
+    if dlogR_dQ[best_idx] >= -1.0:
+        return []
+
+    qc = Q[best_idx]
+    # SLD from Qc:  SLD = (Qc / 4)² / π  × 10⁶
+    sld = (qc / 4) ** 2 / np.pi * 1e6
+
+    edge_sharpness = abs(dlogR_dQ[best_idx])
+    if edge_sharpness > 50:
+        confidence = 'high'
+    elif edge_sharpness > 20:
+        confidence = 'medium'
+    else:
+        confidence = 'low'
+
+    return [{
+        'Qc': float(qc),
+        'estimated_SLD': float(sld),
+        'confidence': confidence,
+        'gradient': float(dlogR_dQ[best_idx]),
+    }]
 
 
 def extract_kiessig_fringes(
