@@ -47,16 +47,28 @@ def _has_output() -> bool:
 
 def _extract_run_name(data_file: str) -> str:
     """
-    Derive a short run name from the data-file path.
+    Derive a short run name from the data-file header.
 
-    Looks for a 6-digit number first (e.g. ``REFL_218386_…``), then
-    falls back to the filename stem.
+    Reads the first line looking for ``Run <number>``.  Falls back to
+    extracting a 6-digit number from the filename, then the sanitised stem.
     """
+    # Try to read the run number from the file header
+    try:
+        with open(data_file, "r") as fh:
+            for line in fh:
+                if not line.startswith("#"):
+                    break
+                m = re.search(r"\bRun\s+(\d+)", line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+
+    # Fallback: extract from filename
     stem = Path(data_file).stem
     m = re.search(r"(\d{6})", stem)
     if m:
         return m.group(1)
-    # Sanitise the stem for use as a directory name
     return re.sub(r"[^\w\-]", "_", stem)
 
 
