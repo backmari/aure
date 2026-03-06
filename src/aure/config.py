@@ -74,9 +74,7 @@ def load_user_config(path: Optional[str | Path] = None) -> UserConfig:
             "[CONFIG]   %d evaluation criteria", len(cfg["evaluation_criteria"])
         )
     if cfg["model_constraints"]:
-        logger.info(
-            "[CONFIG]   %d model constraints", len(cfg["model_constraints"])
-        )
+        logger.info("[CONFIG]   %d model constraints", len(cfg["model_constraints"]))
 
     return cfg
 
@@ -112,6 +110,7 @@ def format_user_constraints(cfg: Optional[UserConfig]) -> str:
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
 
 def _as_str_list(value: Any) -> List[str]:
     """Coerce *value* to a list of strings."""

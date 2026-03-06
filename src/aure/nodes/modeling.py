@@ -88,13 +88,18 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
 
     try:
         user_constraints = format_user_constraints(state.get("user_config"))
+        user_feedback = state.get("pending_user_feedback")
         prompt = format_model_refinement_prompt(
             current_model=current_model,
             sample_description=state.get("sample_description", ""),
             fit_result=latest_fit,
             features=state.get("extracted_features") or {},
             user_constraints=user_constraints,
+            user_feedback=user_feedback,
         )
+        # Clear feedback after consumption
+        if user_feedback:
+            updates["pending_user_feedback"] = None
 
         llm = get_llm(temperature=0)
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -112,23 +117,27 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
                 "[MODELING] LLM-generated script missing required components, keeping current model with widened bounds"
             )
             new_model = _widen_all_bounds(current_model)
-            updates["llm_calls"].append(LLMCallRecord(
-                node="modeling",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                success=True,
-                used_fallback=True,
-                fallback_reason="LLM output failed validation; fell back to widened bounds",
-                error=None,
-            ))
+            updates["llm_calls"].append(
+                LLMCallRecord(
+                    node="modeling",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    success=True,
+                    used_fallback=True,
+                    fallback_reason="LLM output failed validation; fell back to widened bounds",
+                    error=None,
+                )
+            )
         else:
-            updates["llm_calls"].append(LLMCallRecord(
-                node="modeling",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                success=True,
-                used_fallback=False,
-                fallback_reason=None,
-                error=None,
-            ))
+            updates["llm_calls"].append(
+                LLMCallRecord(
+                    node="modeling",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    success=True,
+                    used_fallback=False,
+                    fallback_reason=None,
+                    error=None,
+                )
+            )
 
         updates["current_model"] = new_model
         updates["model_history"] = [
@@ -165,14 +174,16 @@ def _refine_model(state: ReflectivityState) -> Dict[str, Any]:
         else:
             updates["error"] = f"Model refinement failed: {str(e)[:200]}"
         logger.error(f"[MODELING] LLM refinement error: {e}")
-        updates["llm_calls"].append(LLMCallRecord(
-            node="modeling",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            success=False,
-            used_fallback=False,
-            fallback_reason=None,
-            error=str(e)[:200],
-        ))
+        updates["llm_calls"].append(
+            LLMCallRecord(
+                node="modeling",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                success=False,
+                used_fallback=False,
+                fallback_reason=None,
+                error=str(e)[:200],
+            )
+        )
 
     return updates
 

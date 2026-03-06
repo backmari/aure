@@ -297,6 +297,8 @@ def api_start_analysis():
     output_dir = str(Path(output_root).expanduser().resolve() / run_name)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    interactive = bool(body.get("interactive", False))
+
     # Reset run state
     with lock:
         run_state.update({
@@ -306,6 +308,11 @@ def api_start_analysis():
             "iteration": 0,
             "checkpoints": [],
             "error": None,
+            "interactive": interactive,
+            "messages": [],
+            "_pause_event": None,
+            "_user_feedback": None,
+            "_stop_requested": False,
         })
 
     # Store the Flask app reference for the background thread
@@ -327,6 +334,44 @@ def api_start_analysis():
                     "chi2": state.get("current_chi2"),
                     "llm_calls": step_llm,
                 })
+                # Capture experimental data (once) and fit results for live plots
+                if "Q" not in run_state and state.get("Q"):
+                    run_state["Q"] = state["Q"]
+                    run_state["R"] = state["R"]
+                    run_state["dR"] = state.get("dR", [])
+                if state.get("fit_results"):
+                    run_state["fit_results"] = list(state["fit_results"])
+
+        pause_callback = None
+        if interactive:
+            pause_event = threading.Event()
+            with lock:
+                run_state["_pause_event"] = pause_event
+
+            def _pause_cb(state, node_name):
+                """Block until user submits feedback or continues."""
+                # Collect messages for the chat panel
+                msgs = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in state.get("messages", [])
+                ]
+                with lock:
+                    run_state["status"] = "waiting_for_user"
+                    run_state["messages"] = msgs
+                    run_state["_user_feedback"] = None
+                    pause_event.clear()
+
+                pause_event.wait()  # block indefinitely
+
+                with lock:
+                    run_state["status"] = "running"
+                    feedback = run_state.get("_user_feedback")
+                    stop_requested = run_state.get("_stop_requested", False)
+                if stop_requested:
+                    return "__STOP__"  # sentinel recognized by runner
+                return feedback
+
+            pause_callback = _pause_cb
 
         try:
             _run_analysis(
@@ -335,6 +380,8 @@ def api_start_analysis():
                 hypothesis=hypothesis,
                 output_dir=output_dir,
                 checkpoint_callback=_checkpoint_cb,
+                interactive=interactive,
+                pause_callback=pause_callback,
             )
             with lock:
                 run_state["status"] = "complete"
@@ -351,10 +398,101 @@ def api_start_analysis():
     return jsonify({"status": "started", "output_dir": output_dir})
 
 
+@bp.route("/api/live/results")
+def api_live_results():
+    """Return reflectivity, SLD, and parameter data from the live run."""
+    lock: threading.Lock = current_app.config["RUN_LOCK"]
+    run_state: dict = current_app.config["RUN_STATE"]
+
+    with lock:
+        fit_results = run_state.get("fit_results", [])
+        Q = run_state.get("Q", [])
+        R = run_state.get("R", [])
+        dR = run_state.get("dR", [])
+
+    if not fit_results:
+        return jsonify({
+            "Q": [], "R": [], "dR": [], "models": [],
+            "profiles": [],
+            "parameters": [],
+        })
+
+    # Build model curves
+    models = []
+    profiles = []
+    for fr in fit_results:
+        it = fr.get("iteration", 0)
+        chi2 = fr.get("chi_squared")
+        label = f"Iteration {it}"
+        if chi2 is not None:
+            label += f" (\u03c7\u00b2={chi2:.2f})"
+        if fr.get("Q_fit") and fr.get("R_fit"):
+            models.append({"label": label, "Q": fr["Q_fit"], "R": fr["R_fit"], "chi2": chi2})
+        if fr.get("sld_z") and fr.get("sld_rho"):
+            profiles.append({"label": label, "z": fr["sld_z"], "sld": fr["sld_rho"]})
+
+    # Latest fit parameters
+    latest = fit_results[-1]
+    params_list = []
+    params_dict = latest.get("parameters", {})
+    unc_dict = latest.get("uncertainties") or {}
+    for name, value in params_dict.items():
+        params_list.append({
+            "name": name,
+            "value": value,
+            "uncertainty": unc_dict.get(name),
+        })
+
+    return jsonify({
+        "Q": Q, "R": R, "dR": dR,
+        "models": models,
+        "profiles": profiles,
+        "chi_squared": latest.get("chi_squared"),
+        "method": latest.get("method"),
+        "converged": latest.get("converged"),
+        "parameters": params_list,
+        "issues": latest.get("issues", []),
+        "suggestions": latest.get("suggestions", []),
+    })
+
+
+@bp.route("/api/user-feedback", methods=["POST"])
+def api_user_feedback():
+    """Submit user feedback during an interactive pause."""
+    lock: threading.Lock = current_app.config["RUN_LOCK"]
+    run_state: dict = current_app.config["RUN_STATE"]
+
+    body = request.get_json(silent=True) or {}
+    action = (body.get("action") or "continue").strip()
+    feedback_text = (body.get("feedback") or "").strip() or None
+
+    with lock:
+        if run_state.get("status") != "waiting_for_user":
+            return jsonify({"error": "Analysis is not waiting for feedback"}), 409
+        pause_event: threading.Event | None = run_state.get("_pause_event")
+        if pause_event is None:
+            return jsonify({"error": "No pause event found"}), 500
+
+        if action == "stop":
+            run_state["_user_feedback"] = None
+            run_state["_stop_requested"] = True
+            run_state["status"] = "running"
+        else:
+            run_state["_user_feedback"] = feedback_text
+
+        pause_event.set()
+
+    return jsonify({"status": "ok"})
+
+
 @bp.route("/api/analysis-status")
 def api_analysis_status():
     """Return current analysis run state."""
     lock: threading.Lock = current_app.config["RUN_LOCK"]
     run_state: dict = current_app.config["RUN_STATE"]
     with lock:
-        return jsonify(dict(run_state))
+        # Exclude internal objects from the JSON response
+        return jsonify({
+            k: v for k, v in run_state.items()
+            if not k.startswith("_")
+        })

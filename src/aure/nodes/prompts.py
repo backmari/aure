@@ -378,6 +378,7 @@ def format_model_refinement_prompt(
     fit_result: dict,
     features: dict,
     user_constraints: str = "",
+    user_feedback: str | None = None,
 ) -> str:
     """
     Format the model refinement prompt for the LLM.
@@ -388,6 +389,7 @@ def format_model_refinement_prompt(
         fit_result: Latest fit result dict (chi2, parameters, issues, suggestions)
         features: Extracted physics features
         user_constraints: Formatted user-defined model constraints
+        user_feedback: Optional text feedback from the interactive user session
 
     Returns:
         Formatted prompt string
@@ -429,15 +431,28 @@ def format_model_refinement_prompt(
                 )
     features_str = "\n".join(feature_lines) if feature_lines else "  (no features)"
 
-    return MODEL_REFINEMENT_PROMPT.format(
-        sample_description=sample_description or "(not provided)",
-        current_model=current_model,
-        chi_squared=fit_result.get("chi_squared", float("inf")),
-        method=fit_result.get("method", "unknown"),
-        converged="Yes" if fit_result.get("converged", False) else "No",
-        parameters=params_str,
-        issues=issues_str,
-        suggestions=suggestions_str,
-        features=features_str,
-        user_constraints=user_constraints,
+    # Format user feedback (interactive mode)
+    feedback_section = ""
+    if user_feedback:
+        feedback_section = (
+            "\n## User Feedback (from the scientist running this analysis)\n"
+            f"{user_feedback}\n\n"
+            "IMPORTANT: The user's feedback above should take priority over "
+            "automated suggestions when deciding how to refine the model.\n"
+        )
+
+    return (
+        MODEL_REFINEMENT_PROMPT.format(
+            sample_description=sample_description or "(not provided)",
+            current_model=current_model,
+            chi_squared=fit_result.get("chi_squared", float("inf")),
+            method=fit_result.get("method", "unknown"),
+            converged="Yes" if fit_result.get("converged", False) else "No",
+            parameters=params_str,
+            issues=issues_str,
+            suggestions=suggestions_str,
+            features=features_str,
+            user_constraints=user_constraints,
+        )
+        + feedback_section
     )

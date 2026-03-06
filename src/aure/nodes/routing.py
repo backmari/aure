@@ -24,9 +24,7 @@ def route_after_intake(state: ReflectivityState) -> Literal["analysis", "error"]
     return "analysis"
 
 
-def route_after_analysis(
-    state: ReflectivityState
-) -> Literal["modeling", "error"]:
+def route_after_analysis(state: ReflectivityState) -> Literal["modeling", "error"]:
     """
     Route after analysis node.
 
@@ -39,9 +37,7 @@ def route_after_analysis(
     return "modeling"
 
 
-def route_after_modeling(
-    state: ReflectivityState
-) -> Literal["fitting", "error"]:
+def route_after_modeling(state: ReflectivityState) -> Literal["fitting", "error"]:
     """
     Route after modeling node.
     """
@@ -54,9 +50,7 @@ def route_after_modeling(
     return "fitting"
 
 
-def route_after_fitting(
-    state: ReflectivityState
-) -> Literal["evaluation", "error"]:
+def route_after_fitting(state: ReflectivityState) -> Literal["evaluation", "error"]:
     """
     Route after fitting node.
     """
@@ -67,7 +61,7 @@ def route_after_fitting(
 
 
 def route_after_evaluation(
-    state: ReflectivityState
+    state: ReflectivityState,
 ) -> Literal["modeling", "complete", "error"]:
     """
     Route after evaluation node.

@@ -12,10 +12,7 @@ Or with the CLI:
     python -m aure.cli mcp-server
 """
 
-import json
 import os
-import tempfile
-from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -49,6 +46,7 @@ _sessions: dict[str, ReflectivityState] = {}
 # Material Database Tools
 # ============================================================================
 
+
 @mcp.tool()
 def lookup_material_sld(
     material: str,
@@ -56,12 +54,12 @@ def lookup_material_sld(
 ) -> dict:
     """
     Look up the scattering length density (SLD) for a material.
-    
+
     Args:
-        material: Material name (e.g., "silicon", "gold", "D2O") or 
+        material: Material name (e.g., "silicon", "gold", "D2O") or
                   chemical formula (e.g., "SiO2", "Fe2O3")
         wavelength: Neutron wavelength in Angstroms (default 1.8 Å)
-    
+
     Returns:
         Dictionary with SLD value and material info
     """
@@ -87,13 +85,13 @@ def compare_materials(
 ) -> list[dict]:
     """
     Compare SLD values for multiple materials.
-    
+
     Useful for understanding contrast between layers.
-    
+
     Args:
         materials: List of material names or formulas
         wavelength: Neutron wavelength in Angstroms
-    
+
     Returns:
         List of material info dictionaries sorted by SLD
     """
@@ -101,7 +99,7 @@ def compare_materials(
     for mat in materials:
         result = lookup_material_sld(mat, wavelength)
         results.append(result)
-    
+
     # Sort by SLD
     results.sort(key=lambda x: x.get("sld", 0))
     return results
@@ -111,6 +109,7 @@ def compare_materials(
 # Data Analysis Tools
 # ============================================================================
 
+
 @mcp.tool()
 def analyze_reflectivity_features(
     q_values: list[float],
@@ -118,27 +117,27 @@ def analyze_reflectivity_features(
 ) -> dict:
     """
     Extract physics features from reflectivity data.
-    
+
     Analyzes the curve to estimate:
     - Critical edge position (Qc)
     - Total film thickness from fringe spacing
     - Surface/interface roughness from high-Q decay
     - Number of visible fringes
-    
+
     Args:
         q_values: Q values in inverse Angstroms
         r_values: Reflectivity values (normalized, 0-1)
-    
+
     Returns:
         Dictionary of extracted features
     """
     import numpy as np
-    
+
     Q = np.array(q_values)
     R = np.array(r_values)
-    
+
     features = {}
-    
+
     # Find critical edge
     try:
         qc_result = extract_critical_edges(Q, R)
@@ -153,7 +152,7 @@ def analyze_reflectivity_features(
             features["critical_edge"] = {"error": "No critical edge found"}
     except Exception as e:
         features["critical_edge"] = {"error": str(e)}
-    
+
     # Estimate thickness
     try:
         thickness_result = estimate_total_thickness(Q, R)
@@ -165,7 +164,7 @@ def analyze_reflectivity_features(
         }
     except Exception as e:
         features["thickness"] = {"error": str(e)}
-    
+
     # Estimate roughness
     try:
         roughness_result = estimate_roughness(Q, R)
@@ -176,20 +175,21 @@ def analyze_reflectivity_features(
         }
     except Exception as e:
         features["roughness"] = {"error": str(e)}
-    
+
     # Data range
     features["data_range"] = {
         "q_min": round(float(Q.min()), 5),
         "q_max": round(float(Q.max()), 5),
         "n_points": len(Q),
     }
-    
+
     return features
 
 
 # ============================================================================
 # Workflow Session Tools
 # ============================================================================
+
 
 @mcp.tool()
 def start_analysis_session(
@@ -200,29 +200,29 @@ def start_analysis_session(
 ) -> dict:
     """
     Start a new reflectivity analysis session.
-    
+
     This initializes the workflow state and runs the initial
     intake and analysis steps.
-    
+
     Args:
         data_file: Path to the reflectivity data file
         sample_description: Natural language description of the sample
                            (e.g., "100 nm polystyrene on silicon")
         hypothesis: Optional hypothesis to test
         session_id: Optional session ID (auto-generated if not provided)
-    
+
     Returns:
         Session info including extracted features and initial model
     """
     import uuid
-    
+
     if session_id is None:
         session_id = str(uuid.uuid4())[:8]
-    
+
     # Check if data file exists
     if not os.path.exists(data_file):
         return {"error": f"Data file not found: {data_file}"}
-    
+
     # Create initial state and run workflow (without fitting)
     try:
         state = create_initial_state(
@@ -230,13 +230,13 @@ def start_analysis_session(
             sample_description=sample_description,
             hypothesis=hypothesis,
         )
-        
+
         workflow = create_workflow(include_fitting=False)
         final_state = workflow.invoke(state)
-        
+
         # Store session
         _sessions[session_id] = final_state
-        
+
         # Return summary
         return {
             "session_id": session_id,
@@ -258,16 +258,16 @@ def start_analysis_session(
 def get_session_model(session_id: str) -> dict:
     """
     Get the current refl1d model script for a session.
-    
+
     Args:
         session_id: The session ID from start_analysis_session
-    
+
     Returns:
         The model script and session info
     """
     if session_id not in _sessions:
         return {"error": f"Session not found: {session_id}"}
-    
+
     state = _sessions[session_id]
     return {
         "session_id": session_id,
@@ -284,37 +284,37 @@ def run_fit(
 ) -> dict:
     """
     Run the fitting algorithm on the current model.
-    
+
     Args:
         session_id: The session ID
         method: Fitting method - 'lm' (fast), 'de' (global), 'dream' (MCMC)
         max_iterations: Maximum fitting iterations
-    
+
     Returns:
         Fit results including chi-squared and parameters
     """
     if session_id not in _sessions:
         return {"error": f"Session not found: {session_id}"}
-    
+
     state = _sessions[session_id]
-    
+
     if state.get("current_model") is None:
         return {"error": "No model available. Run start_analysis_session first."}
-    
+
     try:
         from .nodes.fitting import run_refl1d_fit
-        
+
         result = run_refl1d_fit(
             model_script=state["current_model"],
             data_file=state["data_file"],
             method=method,
             max_iterations=max_iterations,
         )
-        
+
         # Update state
         state["fit_result"] = result
         state["current_chi2"] = result.get("chi_squared")
-        
+
         return {
             "session_id": session_id,
             "success": result.get("success", False),
@@ -331,35 +331,35 @@ def run_fit(
 def evaluate_fit(session_id: str) -> dict:
     """
     Evaluate the quality of the current fit.
-    
+
     Checks chi-squared, residual patterns, and parameter reasonableness.
-    
+
     Args:
         session_id: The session ID
-    
+
     Returns:
         Evaluation results with issues and suggestions
     """
     if session_id not in _sessions:
         return {"error": f"Session not found: {session_id}"}
-    
+
     state = _sessions[session_id]
-    
+
     if state.get("fit_result") is None:
         return {"error": "No fit result. Run run_fit first."}
-    
+
     try:
         from .nodes.evaluation import analyze_fit_quality
-        
+
         evaluation = analyze_fit_quality(
             chi_squared=state["fit_result"].get("chi_squared", 999),
             residuals=state["fit_result"].get("residuals", []),
             parameters=state["fit_result"].get("parameters", {}),
             parsed_sample=state.get("parsed_sample", {}),
         )
-        
+
         state["evaluation"] = evaluation
-        
+
         return {
             "session_id": session_id,
             "acceptable": evaluation.get("acceptable", False),
@@ -380,31 +380,31 @@ def modify_model(
 ) -> dict:
     """
     Modify the current model.
-    
+
     Available modifications:
     - "widen_bounds": Increase parameter ranges by 50%
     - "add_layer": Add an additional layer to the model
     - "increase_roughness": Allow higher roughness values
     - "set_thickness": Set layer thickness (requires value and layer_index)
     - "set_sld": Set layer SLD (requires value and layer_index)
-    
+
     Args:
         session_id: The session ID
         modification: Type of modification
         value: Optional value for modifications that require it
         layer_index: Layer index for per-layer modifications (0 = first layer from substrate)
-    
+
     Returns:
         Updated model info
     """
     if session_id not in _sessions:
         return {"error": f"Session not found: {session_id}"}
-    
+
     state = _sessions[session_id]
-    
+
     if state.get("current_model") is None:
         return {"error": "No model available."}
-    
+
     try:
         from .nodes.refinement import (
             _widen_bounds,
@@ -413,11 +413,13 @@ def modify_model(
             _set_layer_thickness,
             _set_layer_sld,
         )
-        
+
         model = state["current_model"]
-        
+
         if modification == "widen_bounds":
-            model, success = _widen_bounds(model, state.get("fit_result", {}).get("parameters", {}))
+            model, success = _widen_bounds(
+                model, state.get("fit_result", {}).get("parameters", {})
+            )
             msg = "Widened parameter bounds by 50%" if success else "No changes made"
         elif modification == "increase_roughness":
             model, success = _increase_roughness_bounds(model)
@@ -427,17 +429,27 @@ def modify_model(
             msg = "Added additional layer" if success else "Could not add layer"
         elif modification == "set_thickness":
             if value is None or layer_index is None:
-                return {"error": "set_thickness requires both 'value' and 'layer_index'"}
+                return {
+                    "error": "set_thickness requires both 'value' and 'layer_index'"
+                }
             model, success = _set_layer_thickness(model, layer_index, value)
-            msg = f"Set layer {layer_index} thickness to {value} Å" if success else f"Could not find layer {layer_index}"
+            msg = (
+                f"Set layer {layer_index} thickness to {value} Å"
+                if success
+                else f"Could not find layer {layer_index}"
+            )
         elif modification == "set_sld":
             if value is None or layer_index is None:
                 return {"error": "set_sld requires both 'value' and 'layer_index'"}
             model, success = _set_layer_sld(model, layer_index, value)
-            msg = f"Set layer {layer_index} SLD to {value} × 10⁻⁶ Å⁻²" if success else f"Could not find layer {layer_index}"
+            msg = (
+                f"Set layer {layer_index} SLD to {value} × 10⁻⁶ Å⁻²"
+                if success
+                else f"Could not find layer {layer_index}"
+            )
         else:
             return {"error": f"Unknown modification: {modification}"}
-        
+
         if not success:
             return {
                 "session_id": session_id,
@@ -445,10 +457,10 @@ def modify_model(
                 "message": msg,
                 "success": False,
             }
-        
+
         state["current_model"] = model
         state["iteration"] = state.get("iteration", 0) + 1
-        
+
         return {
             "session_id": session_id,
             "modification": modification,
@@ -464,7 +476,7 @@ def modify_model(
 def list_sessions() -> dict:
     """
     List all active analysis sessions.
-    
+
     Returns:
         Dictionary of session IDs and their status
     """
@@ -484,6 +496,7 @@ def list_sessions() -> dict:
 # Quick Analysis Tool
 # ============================================================================
 
+
 @mcp.tool()
 def quick_analyze(
     data_file: str,
@@ -492,15 +505,15 @@ def quick_analyze(
 ) -> dict:
     """
     Run a complete analysis in one step.
-    
+
     This is a convenience function that runs the full workflow
     including fitting and refinement, returning a summary of results.
-    
+
     Args:
         data_file: Path to reflectivity data file
         sample_description: Description of the sample
         max_iterations: Maximum number of refinement iterations (default: 5)
-    
+
     Returns:
         Complete analysis results
     """
@@ -510,7 +523,7 @@ def quick_analyze(
             sample_description=sample_description,
             max_iterations=max_iterations,
         )
-        
+
         return {
             "success": result.get("error") is None,
             "n_points": len(result.get("Q", [])),
@@ -529,11 +542,12 @@ def quick_analyze(
 # Helper Functions
 # ============================================================================
 
+
 def _summarize_features(features: Optional[dict]) -> Optional[dict]:
     """Create a concise summary of extracted features."""
     if features is None:
         return None
-    
+
     return {
         "estimated_layers": features.get("estimated_n_layers"),
         "estimated_thickness_A": features.get("estimated_total_thickness"),
@@ -546,6 +560,7 @@ def _summarize_features(features: Optional[dict]) -> Optional[dict]:
 # ============================================================================
 # Server Entry Point
 # ============================================================================
+
 
 def main():
     """Run the MCP server."""

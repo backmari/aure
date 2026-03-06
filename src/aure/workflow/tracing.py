@@ -23,7 +23,7 @@ def is_tracing_enabled() -> bool:
 def get_trace_context():
     """
     Get the LangSmith trace context manager if tracing is enabled.
-    
+
     Returns:
         The langsmith.trace context manager, or None if tracing is disabled
         or langsmith is not installed.
@@ -32,6 +32,7 @@ def get_trace_context():
         return None
     try:
         from langsmith import trace
+
         return trace
     except ImportError:
         return None
@@ -46,20 +47,20 @@ def run_with_tracing(
 ) -> Dict[str, Any]:
     """
     Run a function with optional LangSmith tracing.
-    
+
     Args:
         func: The function to run (takes state, returns updates dict)
         state: Current workflow state
         name: Name for the trace span
         trace_ctx: Trace context manager (from get_trace_context), or None
         run_type: LangSmith run type (default: "chain")
-        
+
     Returns:
         The function's return value (updates dict)
     """
     if trace_ctx is None:
         return func(state)
-    
+
     iteration = state.get("iteration", 0)
     with trace_ctx(
         name=name,
@@ -78,28 +79,30 @@ def run_with_tracing(
         },
     ) as run:
         updates = func(state)
-        run.end(outputs={
-            "error": updates.get("error"),
-            "chi2": updates.get("current_chi2") or state.get("current_chi2"),
-            "has_model": (
-                updates.get("current_model") is not None 
-                or state.get("current_model") is not None
-            ),
-            "n_messages": len(updates.get("messages", [])),
-        })
+        run.end(
+            outputs={
+                "error": updates.get("error"),
+                "chi2": updates.get("current_chi2") or state.get("current_chi2"),
+                "has_model": (
+                    updates.get("current_model") is not None
+                    or state.get("current_model") is not None
+                ),
+                "n_messages": len(updates.get("messages", [])),
+            }
+        )
         return updates
 
 
 class TracedWorkflow:
     """
     Context manager for tracing an entire workflow run.
-    
+
     Usage:
         with TracedWorkflow(data_file, sample_description, max_iterations) as tw:
             result = run_workflow(...)
             tw.set_result(result)
     """
-    
+
     def __init__(
         self,
         data_file: str,
@@ -113,9 +116,9 @@ class TracedWorkflow:
         self.max_iterations = max_iterations
         self._trace_ctx = get_trace_context()
         self._trace_cm = None  # The context manager object
-        self._run = None       # The RunTree from __enter__
+        self._run = None  # The RunTree from __enter__
         self._result = None
-    
+
     def __enter__(self):
         if self._trace_ctx is not None:
             # Create the context manager
@@ -136,24 +139,26 @@ class TracedWorkflow:
             # Enter it and store the RunTree
             self._run = self._trace_cm.__enter__()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._trace_cm is not None:
             if self._result is not None and self._run is not None:
-                self._run.end(outputs={
-                    "success": self._result.get("error") is None,
-                    "final_chi2": self._result.get("current_chi2"),
-                    "iterations": self._result.get("iteration", 0),
-                    "n_fit_results": len(self._result.get("fit_results", [])),
-                })
+                self._run.end(
+                    outputs={
+                        "success": self._result.get("error") is None,
+                        "final_chi2": self._result.get("current_chi2"),
+                        "iterations": self._result.get("iteration", 0),
+                        "n_fit_results": len(self._result.get("fit_results", [])),
+                    }
+                )
             # Exit the context manager (not the RunTree)
             self._trace_cm.__exit__(exc_type, exc_val, exc_tb)
         return False  # Don't suppress exceptions
-    
+
     def set_result(self, result: Dict[str, Any]):
         """Set the workflow result for trace output."""
         self._result = result
-    
+
     @property
     def is_tracing(self) -> bool:
         """Check if this workflow run is being traced."""
