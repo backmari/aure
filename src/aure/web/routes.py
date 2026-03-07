@@ -756,3 +756,77 @@ def api_analysis_status():
     with lock:
         # Exclude internal objects from the JSON response
         return jsonify({k: v for k, v in run_state.items() if not k.startswith("_")})
+
+
+# ------------------------------------------------------------------
+# JSON API – data export
+# ------------------------------------------------------------------
+
+
+@bp.route("/api/export-info")
+def api_export_info():
+    """Return export availability and format metadata.
+
+    Used by the Results page to conditionally show the Export button.
+    """
+    from ..exporters import get_exporter
+
+    exporter = get_exporter()
+    if exporter is None:
+        return jsonify({"available": False})
+    return jsonify(
+        {
+            "available": True,
+            "format": exporter.format_id,
+            "name": exporter.name,
+        }
+    )
+
+
+@bp.route("/api/export", methods=["POST"])
+def api_export():
+    """Run the configured data exporter on the current results.
+
+    Returns JSON with ``success``, ``output_path``, ``errors``, and ``warnings``.
+    """
+    from ..exporters import get_exporter
+
+    exporter = get_exporter()
+    if exporter is None:
+        return jsonify({"error": "No exporter configured"}), 400
+
+    output_dir = current_app.config.get("OUTPUT_DIR")
+    if not output_dir or not Path(output_dir).exists():
+        return jsonify({"error": "No analysis output found"}), 404
+
+    rd = _run_data()
+    if not rd:
+        return jsonify({"error": "No analysis output found"}), 404
+
+    state = rd.get_final_state()
+    run_info = rd.get_run_info()
+    if not state:
+        return jsonify({"error": "Could not load final state"}), 404
+
+    lock: threading.Lock = current_app.config["RUN_LOCK"]
+    run_state: dict = current_app.config["RUN_STATE"]
+    with lock:
+        if run_state.get("status") == "running":
+            return jsonify({"error": "Cannot export while analysis is running"}), 409
+
+    try:
+        result = exporter.export(
+            output_dir=Path(output_dir),
+            state=state,
+            run_info=run_info,
+        )
+        return jsonify(
+            {
+                "success": result.success,
+                "output_path": str(result.output_path) if result.output_path else None,
+                "errors": result.errors,
+                "warnings": result.warnings,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Export failed: {exc}"}), 500

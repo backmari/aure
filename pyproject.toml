@@ -8,37 +8,27 @@ version = "0.1.0"
 description = "Thin film reflectivity sample builder with neural network foundation model"
 readme = "README.md"
 requires-python = ">=3.9"
-authors = [
-    {name = "Oak Ridge National Laboratory"}
-]
+authors = [{ name = "Oak Ridge National Laboratory" }]
 
-dependencies = [
-    "flask>=3.0",
-    "numpy>=1.24",
-    "scipy>=1.10",
-    "refl1d>=1.0",
-]
+dependencies = ["flask>=3.0", "numpy>=1.24", "scipy>=1.10", "refl1d>=1.0"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-]
+dev = ["pytest>=7.0"]
 agent = [
-    "langgraph>=1.0",
-    "langchain>=1.0",
-    "langchain-openai>=1.0",
-    "langchain-google-genai>=2.0.0",
-    "periodictable>=2.0",
-    "fastmcp>=2.0",
-    "click>=8.0",
-    "pyyaml>=6.0",
+  "langgraph>=1.0",
+  "langchain>=1.0",
+  "langchain-openai>=1.0",
+  "langchain-google-genai>=2.0.0",
+  "periodictable>=2.0",
+  "fastmcp>=2.0",
+  "click>=8.0",
+  "pyyaml>=6.0",
 ]
-alcf = [
-    "globus-sdk>=3.0",
+alcf = ["globus-sdk>=3.0"]
+export = [
+  "nr-isaac-format @ git+https://github.com/isaac-neutrons/nr-isaac-format.git",
 ]
-all = [
-    "aure[dev,agent,alcf]",
-]
+all = ["aure[dev,agent,alcf,export]"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
