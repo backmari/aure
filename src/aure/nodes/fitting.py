@@ -204,6 +204,7 @@ def _extract_bumps_results(
     parameters = {}
     uncertainties = {}
 
+    param_bounds = {}
     for i, par in enumerate(problem._parameters):
         name = str(par.name)
         parameters[name] = par.value
@@ -215,6 +216,11 @@ def _extract_bumps_results(
                     uncertainties[name] = fit_result.dx[i]
             except (IndexError, TypeError):
                 pass
+
+        # Get parameter bounds
+        if par.bounds is not None:
+            lo, hi = par.bounds
+            param_bounds[name] = [float(lo), float(hi)]
 
     # Check convergence
     converged = chi_squared < 100  # Simple heuristic
@@ -238,6 +244,7 @@ def _extract_bumps_results(
         converged=converged,
         parameters=parameters,
         uncertainties=uncertainties if uncertainties else None,
+        bounds=param_bounds if param_bounds else None,
         Q_fit=Q_fit,
         R_fit=R_fit,
         residuals=[],

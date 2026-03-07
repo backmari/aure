@@ -213,6 +213,7 @@ IMPORTANT CONSTRAINTS:
 - Do NOT suggest splitting a single layer into sublayers (e.g., splitting 'copper oxide' into CuO + Cu₂O, or
   splitting SEI into sub-layers) unless χ² > 10 and there is clear evidence in the residuals of unmodeled
   contrast steps.  Keeping the model simple with fewer layers improves parameter stability.
+- Unless specifically requested by the user, never allow the substrate SLD to vary.
 
 {user_criteria}
 """
@@ -366,6 +367,7 @@ Rules:
     model, consider removing it or fixing its thickness to < 20 Å to free up fitting
     capacity for unknown layers.  **However**, if the user explicitly requests an
     SiO₂ layer in their feedback, you MUST add it.
+17. Unless specifically requested by the user, never allow the substrate SLD to vary.
 
 {user_constraints}
 

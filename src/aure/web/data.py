@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -257,7 +256,8 @@ class RunData:
             try:
                 fitted_params = fr.get("parameters", {})
                 result = _execute_model_file(
-                    model_file, Q_data,
+                    model_file,
+                    Q_data,
                     working_dir=self.output_dir.parent,
                     fitted_parameters=fitted_params,
                 )
@@ -285,17 +285,28 @@ class RunData:
                 "chi_squared": float,
                 "method": str,
                 "converged": bool,
-                "parameters": [{"name": ..., "value": ..., "uncertainty": ...}],
+                "parameters": [{"name": ..., "value": ..., "uncertainty": ...,
+                                "bounds": [lo, hi] | null}],
             }
         """
         state = self.get_final_state()
         fit_results = state.get("fit_results", [])
         if not fit_results:
-            return {"parameters": [], "chi_squared": None, "method": None, "converged": None}
+            return {
+                "parameters": [],
+                "chi_squared": None,
+                "method": None,
+                "converged": None,
+            }
 
         latest = fit_results[-1]
         params = latest.get("parameters", {})
         uncertainties = latest.get("uncertainties") or {}
+        bounds = latest.get("bounds") or {}
+
+        # Fallback: read bounds from problem.json when not stored in state
+        if not bounds:
+            bounds = self._read_bounds_from_problem_json()
 
         rows = []
         for name, value in params.items():
@@ -304,6 +315,7 @@ class RunData:
                     "name": name,
                     "value": value,
                     "uncertainty": uncertainties.get(name),
+                    "bounds": bounds.get(name),
                 }
             )
 
@@ -314,10 +326,42 @@ class RunData:
             "parameters": rows,
         }
 
+    def _read_bounds_from_problem_json(self) -> dict:
+        """Extract parameter bounds from the persisted ``problem.json``.
+
+        Returns ``{param_name: [lo, hi]}`` for free parameters with finite
+        bounds, or an empty dict if the file is unavailable.
+        """
+        path = self.output_dir / "problem.json"
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text())
+            refs = data.get("references", {})
+            bounds: dict = {}
+            for ref in refs.values():
+                if ref.get("fixed"):
+                    continue
+                name = ref.get("name", "")
+                limits = ref.get("limits")
+                if not name or not limits or len(limits) < 2:
+                    continue
+                try:
+                    lo = float(limits[0])
+                    hi = float(limits[1])
+                except (ValueError, TypeError):
+                    continue
+                if lo != float("-inf") and hi != float("inf"):
+                    bounds[name] = [lo, hi]
+            return bounds
+        except Exception:
+            return {}
+
 
 # ======================================================================
 # Model-file execution helper  (adapted from cli.py)
 # ======================================================================
+
 
 def _execute_model_file(
     model_file: Path,
@@ -366,6 +410,7 @@ def _execute_model_file(
             # problem may not exist; try wrapping experiment
             try:
                 from bumps.fitproblem import FitProblem
+
                 tmp_problem = FitProblem(experiment)
                 _apply_fitted_parameters(tmp_problem, fitted_parameters)
             except Exception:
@@ -386,9 +431,7 @@ def _execute_model_file(
         os.chdir(original_cwd)
 
 
-def _apply_fitted_parameters(
-    problem: Any, fitted_parameters: Dict[str, float]
-) -> None:
+def _apply_fitted_parameters(problem: Any, fitted_parameters: Dict[str, float]) -> None:
     """Set parameter values on a bumps ``FitProblem`` from a name→value dict."""
     params = getattr(problem, "_parameters", None)
     if params is None:
@@ -397,6 +440,3 @@ def _apply_fitted_parameters(
         name = str(par.name)
         if name in fitted_parameters:
             par.value = float(fitted_parameters[name])
-
-
-

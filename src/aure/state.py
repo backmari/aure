@@ -91,6 +91,7 @@ class FitResult(TypedDict):
     # Best-fit parameters
     parameters: dict  # {param_name: value}
     uncertainties: Optional[dict]  # {param_name: uncertainty}
+    bounds: Optional[dict]  # {param_name: [low, high]}
 
     # Curves for plotting
     Q_fit: List[float]

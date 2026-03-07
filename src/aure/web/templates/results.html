@@ -44,6 +44,7 @@
                 <th>Parameter</th>
                 <th class="text-end">Value</th>
                 <th class="text-end">Uncertainty (±)</th>
+                <th style="min-width:140px">Range</th>
               </tr>
             </thead>
             <tbody id="param-table-body"></tbody>
@@ -299,6 +300,46 @@ function renderSLD(data) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Parameter range indicator                                         */
+/* ------------------------------------------------------------------ */
+function buildRangeIndicator(p) {
+  if (!p.bounds || p.bounds.length < 2) return '<span class="text-muted small">—</span>';
+
+  const lo = p.bounds[0], hi = p.bounds[1];
+  const range = hi - lo;
+  if (range <= 0) return '<span class="text-muted small">—</span>';
+
+  const pct = Math.max(0, Math.min(100, ((p.value - lo) / range) * 100));
+
+  // Color: red near edges (< 5% or > 95%), amber (5-15% / 85-95%), green in middle
+  let color = "#198754"; // green
+  let label = "";
+  if (pct <= 5 || pct >= 95) {
+    color = "#dc3545"; // red
+    label = "at boundary";
+  } else if (pct <= 15 || pct >= 85) {
+    color = "#fd7e14"; // amber
+    label = "near boundary";
+  }
+
+  const loLabel = lo.toPrecision(3);
+  const hiLabel = hi.toPrecision(3);
+  const tooltip = `${loLabel} — ${p.value.toPrecision(5)} — ${hiLabel}` +
+    (label ? ` (${label})` : "");
+
+  // Build a compact bar: track + marker
+  return `<div class="d-flex align-items-center gap-1" title="${tooltip}" style="cursor:help">
+    <span class="text-muted" style="font-size:.65rem;min-width:32px;text-align:right">${loLabel}</span>
+    <div style="position:relative;flex:1;height:8px;background:#e9ecef;border-radius:4px;min-width:60px">
+      <div style="position:absolute;left:${pct}%;top:50%;transform:translate(-50%,-50%);
+                  width:10px;height:10px;border-radius:50%;background:${color};
+                  border:1.5px solid #fff;box-shadow:0 0 0 1px ${color}40"></div>
+    </div>
+    <span class="text-muted" style="font-size:.65rem;min-width:32px">${hiLabel}</span>
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Parameter table                                                   */
 /* ------------------------------------------------------------------ */
 function renderParams(data) {
@@ -321,12 +362,14 @@ function renderParams(data) {
   data.parameters.forEach((p) => {
     const val = typeof p.value === "number" ? p.value.toPrecision(5) : p.value;
     const unc = p.uncertainty != null ? `± ${p.uncertainty.toPrecision(3)}` : "—";
+    const rangeHtml = buildRangeIndicator(p);
     tbody.insertAdjacentHTML(
       "beforeend",
       `<tr>
          <td><code>${p.name}</code></td>
          <td class="text-end">${val}</td>
          <td class="text-end">${unc}</td>
+         <td>${rangeHtml}</td>
        </tr>`
     );
   });
