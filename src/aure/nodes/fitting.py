@@ -42,9 +42,12 @@ def fitting_node(state: ReflectivityState) -> Dict[str, Any]:
 
     iteration = state.get("iteration", 0)
     method = os.environ.get("FIT_METHOD", "dream").lower()
-    steps = int(os.environ.get("FIT_STEPS", "1000"))
-    burn = int(os.environ.get("FIT_BURN", "1000"))
-    logger.info(f"[FITTING] Starting iteration {iteration}")
+    # Allow UI / state override for DREAM steps, then env var, then default
+    steps = int(state.get("fit_steps") or os.environ.get("FIT_STEPS", "1000"))
+    burn = int(state.get("fit_burn") or os.environ.get("FIT_BURN", str(steps)))
+    logger.info(
+        f"[FITTING] Starting iteration {iteration} (steps={steps}, burn={burn})"
+    )
 
     # Build export directory for refl1d output
     export_dir: Optional[str] = None
@@ -119,7 +122,6 @@ def run_refl1d_fit(
         FitResult dictionary
     """
     from bumps.fitters import fit as bumps_fit
-    from bumps.fitproblem import FitProblem
 
     # Create temporary directory for model execution
     with tempfile.TemporaryDirectory() as tmpdir:

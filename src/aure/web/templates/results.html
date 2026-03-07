@@ -56,6 +56,96 @@
     </div>
   </div>
 </div>
+
+<!-- Restart with New Insight -->
+<div class="row mt-3" id="restart-section">
+  <div class="col">
+    <div class="card border-primary">
+      <div class="card-header fw-semibold bg-primary bg-opacity-10">
+        <i class="bi bi-arrow-repeat"></i> Restart Analysis with New Insight
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Not satisfied with the results? Provide new guidance and restart
+          the modelling/fitting loop. Previous results are preserved in the
+          checkpoint history.
+        </p>
+        <div class="mb-3">
+          <label for="restart-insight" class="form-label fw-semibold">
+            New Insight / Guidance
+          </label>
+          <textarea id="restart-insight" class="form-control" rows="3"
+                    placeholder="e.g. 'Try adding an oxide interlayer between Fe and Si' or 'The roughness on the top layer seems too low, allow up to 15 Å'"></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Restart From</label>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="restart-from"
+                   id="restart-modeling" value="modeling" checked />
+            <label class="form-check-label" for="restart-modeling">
+              <strong>Re-model &amp; re-fit</strong>
+              <span class="text-muted">— rebuild the model with new guidance and re-fit</span>
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="restart-from"
+                   id="restart-analysis" value="analysis" />
+            <label class="form-check-label" for="restart-analysis">
+              <strong>Re-analyse from scratch</strong>
+              <span class="text-muted">— re-extract features and rebuild the model entirely</span>
+            </label>
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label for="restart-checkpoint" class="form-label fw-semibold">
+              Restart from Checkpoint <span class="text-muted fw-normal">(optional)</span>
+            </label>
+            <select id="restart-checkpoint" class="form-select">
+              <option value="">— latest state (default) —</option>
+            </select>
+            <div class="form-text">
+              Roll back to a previous iteration checkpoint before restarting.
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label for="restart-dream-steps" class="form-label fw-semibold">
+              DREAM Steps <span class="text-muted fw-normal">(optional)</span>
+            </label>
+            <input type="number" id="restart-dream-steps" class="form-control"
+                   min="100" step="100" placeholder="default (1000)"
+                   style="max-width:180px" />
+            <div class="form-text">
+              Number of DREAM MCMC sampling steps for the fitting stage.
+            </div>
+          </div>
+        </div>
+        <button id="btn-restart" class="btn btn-primary" type="button"
+                onclick="restartAnalysis()">
+          <i class="bi bi-arrow-repeat"></i> Restart Analysis
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Restart in-progress banner (hidden by default) -->
+<div class="row mt-3 d-none" id="restart-progress">
+  <div class="col">
+    <div class="card border-info">
+      <div class="card-body text-center py-4">
+        <div class="spinner-border text-primary mb-2" role="status">
+          <span class="visually-hidden">Running…</span>
+        </div>
+        <h6>Analysis is running…</h6>
+        <p class="text-muted mb-1" id="restart-progress-detail">Starting…</p>
+        <p class="text-muted small mb-0">
+          This page will refresh automatically when the run completes.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -67,15 +157,33 @@ const COLORS = [
 
 document.addEventListener("DOMContentLoaded", async () => {
   // Fetch data in parallel
-  const [reflData, sldData, paramData] = await Promise.all([
+  const [reflData, sldData, paramData, chi2Data] = await Promise.all([
     fetch("/api/reflectivity").then((r) => r.json()),
     fetch("/api/sld").then((r) => r.json()),
     fetch("/api/parameters").then((r) => r.json()),
+    fetch("/api/chi2").then((r) => r.json()),
   ]);
 
   renderRQ(reflData);
   renderSLD(sldData);
   renderParams(paramData);
+
+  // Populate restart checkpoint dropdown from workflow steps
+  const sel = document.getElementById("restart-checkpoint");
+  if (sel && chi2Data && chi2Data.length) {
+    const seen = {};
+    chi2Data.forEach((d) => {
+      if (d.node !== "evaluation") return;
+      const iter = d.iteration;
+      if (seen[iter]) return;
+      seen[iter] = true;
+      const chi2Label = d.chi2 != null ? ` (χ²=${d.chi2.toFixed(2)})` : "";
+      const opt = document.createElement("option");
+      opt.value = String(iter);
+      opt.textContent = `Iteration ${iter}${chi2Label}`;
+      sel.appendChild(opt);
+    });
+  }
 });
 
 /* ------------------------------------------------------------------ */
@@ -200,5 +308,111 @@ function renderParams(data) {
     );
   });
 }
+
+/* ------------------------------------------------------------------ */
+/*  Restart analysis                                                  */
+/* ------------------------------------------------------------------ */
+async function restartAnalysis() {
+  const insight = document.getElementById("restart-insight").value.trim();
+  if (!insight) {
+    alert("Please describe what you'd like to change before restarting.");
+    return;
+  }
+  const restartFrom = document.querySelector(
+    'input[name="restart-from"]:checked'
+  ).value;
+
+  const btn = document.getElementById("btn-restart");
+  btn.disabled = true;
+  btn.innerHTML =
+    '<span class="spinner-border spinner-border-sm"></span> Starting…';
+
+  // Collect optional advanced parameters
+  const payload = {
+    insight,
+    restart_from: restartFrom,
+  };
+  const dreamStepsEl = document.getElementById("restart-dream-steps");
+  if (dreamStepsEl && dreamStepsEl.value) {
+    payload.dream_steps = parseInt(dreamStepsEl.value, 10);
+  }
+  const checkpointEl = document.getElementById("restart-checkpoint");
+  if (checkpointEl && checkpointEl.value) {
+    payload.checkpoint_iteration = parseInt(checkpointEl.value, 10);
+  }
+
+  try {
+    const resp = await fetch("/api/restart-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      alert(data.error || data.errors?.join(", ") || "Restart failed");
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Restart Analysis';
+      return;
+    }
+
+    // Hide restart form, show progress banner
+    document.getElementById("restart-section").classList.add("d-none");
+    document.getElementById("restart-progress").classList.remove("d-none");
+    pollRestartStatus();
+  } catch (err) {
+    alert("Network error: " + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Restart Analysis';
+  }
+}
+
+let _pollTimer = null;
+
+function pollRestartStatus() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch("/api/analysis-status");
+      const data = await resp.json();
+      const detail = document.getElementById("restart-progress-detail");
+
+      if (data.current_node) {
+        let txt = `Node: ${data.current_node}`;
+        if (data.iteration) txt += ` · Iteration ${data.iteration}`;
+        detail.textContent = txt;
+      }
+
+      if (data.status === "complete" || data.status === "error") {
+        clearInterval(_pollTimer);
+        _pollTimer = null;
+        // Reload page to show updated results
+        window.location.reload();
+      }
+    } catch (e) {
+      /* ignore transient fetch errors */
+    }
+  }, 2000);
+}
+
+/* ------------------------------------------------------------------ */
+/*  On load: check if an analysis is already running                  */
+/* ------------------------------------------------------------------ */
+async function checkRunningStatus() {
+  try {
+    const resp = await fetch("/api/analysis-status");
+    const data = await resp.json();
+    if (data.status === "running") {
+      document.getElementById("restart-section").classList.add("d-none");
+      document.getElementById("restart-progress").classList.remove("d-none");
+      pollRestartStatus();
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  checkRunningStatus();
+});
 </script>
 {% endblock %}

@@ -31,6 +31,7 @@ function _saveFormValues() {
     hypothesis: document.getElementById("hypothesis").value,
     output_dir: document.getElementById("output-dir").value,
     interactive: document.getElementById("interactive-mode").checked,
+    max_iterations: parseInt(document.getElementById("max-iterations").value, 10) || 5,
   };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vals)); } catch (_) {}
 }
@@ -45,6 +46,7 @@ function _restoreFormValues() {
     if (vals.hypothesis)  document.getElementById("hypothesis").value = vals.hypothesis;
     if (vals.output_dir)  document.getElementById("output-dir").value = vals.output_dir;
     if (vals.interactive)  document.getElementById("interactive-mode").checked = vals.interactive;
+    if (vals.max_iterations) document.getElementById("max-iterations").value = vals.max_iterations;
   } catch (_) {}
 }
 
@@ -179,6 +181,8 @@ function startAnalysis() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting…';
 
+  const maxIter = parseInt(document.getElementById("max-iterations").value, 10) || 5;
+
   fetch("/api/start-analysis", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -188,6 +192,7 @@ function startAnalysis() {
       hypothesis: hypothesis || null,
       output_dir: outputDir,
       interactive: document.getElementById("interactive-mode").checked,
+      max_iterations: maxIter,
     }),
   })
     .then((r) => r.json().then((d) => ({ ok: r.ok, data: d })))
@@ -281,6 +286,8 @@ function pollStatus() {
       const chatPanel = document.getElementById("chat-panel");
       if (st.status === "waiting_for_user") {
         chatPanel.style.display = "";
+        // Populate checkpoint dropdown with evaluation checkpoints
+        _populateFeedbackCheckpoints(st.checkpoints || []);
         if (!_liveResultsFetched) {
           _liveResultsFetched = true;
           _fetchLiveResults();
@@ -369,10 +376,22 @@ function _escapeHtml(text) {
 }
 
 function _postFeedback(action, feedback) {
+  var payload = { action: action, feedback: feedback || null };
+
+  // Include advanced options if set
+  var dreamStepsEl = document.getElementById("fb-dream-steps");
+  var checkpointEl = document.getElementById("fb-checkpoint");
+  if (dreamStepsEl && dreamStepsEl.value) {
+    payload.dream_steps = parseInt(dreamStepsEl.value, 10);
+  }
+  if (checkpointEl && checkpointEl.value) {
+    payload.restart_checkpoint = checkpointEl.value;
+  }
+
   fetch("/api/user-feedback", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: action, feedback: feedback || null }),
+    body: JSON.stringify(payload),
   })
     .then(function (r) { return r.json(); })
     .then(function (data) {
@@ -384,9 +403,35 @@ function _postFeedback(action, feedback) {
       const bar = document.getElementById("progress-bar");
       bar.classList.add("progress-bar-animated");
       document.getElementById("chat-panel").style.display = "none";
+      // Reset advanced options for next pause
+      if (dreamStepsEl) dreamStepsEl.value = "";
+      if (checkpointEl) checkpointEl.value = "";
       pollStatus();
     })
     .catch(function (err) { alert("Network error: " + err); });
+}
+
+function _populateFeedbackCheckpoints(checkpoints) {
+  var sel = document.getElementById("fb-checkpoint");
+  if (!sel) return;
+  // Preserve current selection
+  var prev = sel.value;
+  sel.innerHTML = '<option value="">— continue normally —</option>';
+  // Build options from evaluation checkpoints that contain an iteration
+  var seen = {};
+  checkpoints.forEach(function (cp, i) {
+    if (cp.node !== "evaluation") return;
+    var iter = cp.iteration || i;
+    if (seen[iter]) return;
+    seen[iter] = true;
+    var chi2Label = cp.chi2 != null ? " (χ²=" + cp.chi2.toFixed(2) + ")" : "";
+    var opt = document.createElement("option");
+    opt.value = String(iter);
+    opt.textContent = "Iteration " + iter + chi2Label;
+    sel.appendChild(opt);
+  });
+  // Restore selection if still valid
+  if (prev) sel.value = prev;
 }
 
 function sendFeedback() {

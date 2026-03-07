@@ -18,7 +18,7 @@ from typing import Dict, Any
 # SAMPLE DESCRIPTION PARSING
 # ============================================================================
 
-SAMPLE_PARSE_PROMPT = """You are analyzing a neutron reflectivity experiment. 
+SAMPLE_PARSE_PROMPT = """You are analyzing a neutron reflectivity experiment.
 The user describes their sample as:
 
 "{description}"
@@ -106,7 +106,7 @@ HYPOTHESIZED / EXPECTED LAYERS:
 
 IMPORTANT:
 - If thickness is given in nm, convert to Å (1 nm = 10 Å).
-- If the user mentions neutrons coming from the substrate side, or back reflection, 
+- If the user mentions neutrons coming from the substrate side, or back reflection,
   or measuring through the substrate, set back_reflection to true.
 - Pay attention to what the ambient medium is - it may be a solvent like THF, not air.
 - If a value is not specified, use reasonable defaults based on the material.
@@ -333,7 +333,7 @@ Rules:
 6. Always include `probe.intensity.range(...)` for normalization.
 7. The script must end with `experiment = Experiment(probe=probe, sample=sample)` and `problem = FitProblem(experiment)`.
 8. NEVER change the fitting engine/method. The fitting method is chosen by the workflow — focus only on the model.
-9. Do NOT add an SiO₂ layer on the silicon substrate (see rule 16).
+9. By default, avoid adding an SiO₂ layer on the silicon substrate (see rule 16), unless the user explicitly requests it in their feedback below.
 10. NEVER change the back-reflection/measurement geometry. If the current model uses `back_reflectivity(...)` or `back_absorption(...)`, you MUST keep it. Do NOT reverse the layer order or swap the fronting/backing media. The geometry is determined by the physical experiment and is NOT a fitting parameter.
 11. NEVER change error bars, resolution, or Q-range — these are experimental parameters.
 12. Use SLD ranges of at least ±1.0 around nominal values for each material to give the fitter sufficient freedom.
@@ -360,13 +360,18 @@ Rules:
     NEVER add a layer with initial thickness < 5 Å — such layers cannot be resolved
     by the fitter and will collapse.  Also give the thickness range enough room
     (e.g., 5 to 500 Å for SEI, 5 to 200 Å for oxides).
-16. Do NOT add an SiO₂ layer on the silicon substrate.  Native SiO₂ is typically only
-    10–20 Å and in reflectometry it adds 3 parameters that can absorb signal from
-    more important layers.  If an SiO₂ layer is already in the model, consider
-    removing it or fixing its thickness to < 20 Å to free up fitting capacity for
-    unknown layers.
+16. By default, avoid adding an SiO₂ layer on the silicon substrate.  Native SiO₂
+    is typically only 10–20 Å and in reflectometry it adds 3 parameters that can
+    absorb signal from more important layers.  If an SiO₂ layer is already in the
+    model, consider removing it or fixing its thickness to < 20 Å to free up fitting
+    capacity for unknown layers.  **However**, if the user explicitly requests an
+    SiO₂ layer in their feedback, you MUST add it.
 
 {user_constraints}
+
+IMPORTANT: If user feedback is provided below, it takes absolute priority over
+any of the rules above.  The user is the domain expert — follow their
+instructions even if they contradict a default rule.
 
 Output ONLY the Python script, no markdown fences, no explanation — just the script itself.
 """
@@ -437,8 +442,10 @@ def format_model_refinement_prompt(
         feedback_section = (
             "\n## User Feedback (from the scientist running this analysis)\n"
             f"{user_feedback}\n\n"
-            "IMPORTANT: The user's feedback above should take priority over "
-            "automated suggestions when deciding how to refine the model.\n"
+            "IMPORTANT: The user's feedback above is authoritative. Follow it "
+            "even if it conflicts with any of the numbered rules above. The "
+            "user is the domain expert and their instructions override all "
+            "default constraints.\n"
         )
 
     return (

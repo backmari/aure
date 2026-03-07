@@ -1,6 +1,5 @@
 """Flask blueprint – page routes and JSON API endpoints."""
 
-import os
 import re
 import threading
 from pathlib import Path
@@ -44,6 +43,7 @@ def _has_output() -> bool:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _extract_run_name(data_file: str) -> str:
     """
@@ -167,7 +167,16 @@ def api_parameters():
 def api_llm_status():
     rd = _run_data()
     if not rd:
-        return jsonify({"total": 0, "succeeded": 0, "failed": 0, "used_fallback": 0, "all_ok": True, "calls": []})
+        return jsonify(
+            {
+                "total": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "used_fallback": 0,
+                "all_ok": True,
+                "calls": [],
+            }
+        )
     return jsonify(rd.get_llm_summary())
 
 
@@ -206,13 +215,17 @@ def api_browse_files():
 
     entries = []
     try:
-        for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for child in sorted(
+            target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        ):
             if child.name.startswith("."):
                 continue
             if child.is_dir():
                 entries.append({"name": child.name, "is_dir": True, "path": str(child)})
             elif not ext or child.suffix.lower() == ext.lower():
-                entries.append({"name": child.name, "is_dir": False, "path": str(child)})
+                entries.append(
+                    {"name": child.name, "is_dir": False, "path": str(child)}
+                )
     except PermissionError:
         return jsonify({"error": "Permission denied"}), 403
 
@@ -298,22 +311,25 @@ def api_start_analysis():
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     interactive = bool(body.get("interactive", False))
+    max_iterations = int(body.get("max_iterations", 5))
 
     # Reset run state
     with lock:
-        run_state.update({
-            "status": "running",
-            "output_dir": output_dir,
-            "current_node": None,
-            "iteration": 0,
-            "checkpoints": [],
-            "error": None,
-            "interactive": interactive,
-            "messages": [],
-            "_pause_event": None,
-            "_user_feedback": None,
-            "_stop_requested": False,
-        })
+        run_state.update(
+            {
+                "status": "running",
+                "output_dir": output_dir,
+                "current_node": None,
+                "iteration": 0,
+                "checkpoints": [],
+                "error": None,
+                "interactive": interactive,
+                "messages": [],
+                "_pause_event": None,
+                "_user_feedback": None,
+                "_stop_requested": False,
+            }
+        )
 
     # Store the Flask app reference for the background thread
     app = current_app._get_current_object()
@@ -327,13 +343,18 @@ def api_start_analysis():
                 run_state["iteration"] = state.get("iteration", 0)
                 # Compute LLM calls for this step by diffing cumulative list
                 all_llm = state.get("llm_calls", [])
-                prev_count = sum(len(cp.get("llm_calls", [])) for cp in run_state["checkpoints"])
+                prev_count = sum(
+                    len(cp.get("llm_calls", [])) for cp in run_state["checkpoints"]
+                )
                 step_llm = all_llm[prev_count:]
-                run_state["checkpoints"].append({
-                    "node": node_name,
-                    "chi2": state.get("current_chi2"),
-                    "llm_calls": step_llm,
-                })
+                run_state["checkpoints"].append(
+                    {
+                        "node": node_name,
+                        "iteration": state.get("iteration", 0),
+                        "chi2": state.get("current_chi2"),
+                        "llm_calls": step_llm,
+                    }
+                )
                 # Capture experimental data (once) and fit results for live plots
                 if "Q" not in run_state and state.get("Q"):
                     run_state["Q"] = state["Q"]
@@ -378,6 +399,7 @@ def api_start_analysis():
                 data_file=data_file,
                 sample_description=sample_description,
                 hypothesis=hypothesis,
+                max_iterations=max_iterations,
                 output_dir=output_dir,
                 checkpoint_callback=_checkpoint_cb,
                 interactive=interactive,
@@ -411,11 +433,16 @@ def api_live_results():
         dR = run_state.get("dR", [])
 
     if not fit_results:
-        return jsonify({
-            "Q": [], "R": [], "dR": [], "models": [],
-            "profiles": [],
-            "parameters": [],
-        })
+        return jsonify(
+            {
+                "Q": [],
+                "R": [],
+                "dR": [],
+                "models": [],
+                "profiles": [],
+                "parameters": [],
+            }
+        )
 
     # Build model curves
     models = []
@@ -427,7 +454,9 @@ def api_live_results():
         if chi2 is not None:
             label += f" (\u03c7\u00b2={chi2:.2f})"
         if fr.get("Q_fit") and fr.get("R_fit"):
-            models.append({"label": label, "Q": fr["Q_fit"], "R": fr["R_fit"], "chi2": chi2})
+            models.append(
+                {"label": label, "Q": fr["Q_fit"], "R": fr["R_fit"], "chi2": chi2}
+            )
         if fr.get("sld_z") and fr.get("sld_rho"):
             profiles.append({"label": label, "z": fr["sld_z"], "sld": fr["sld_rho"]})
 
@@ -437,23 +466,29 @@ def api_live_results():
     params_dict = latest.get("parameters", {})
     unc_dict = latest.get("uncertainties") or {}
     for name, value in params_dict.items():
-        params_list.append({
-            "name": name,
-            "value": value,
-            "uncertainty": unc_dict.get(name),
-        })
+        params_list.append(
+            {
+                "name": name,
+                "value": value,
+                "uncertainty": unc_dict.get(name),
+            }
+        )
 
-    return jsonify({
-        "Q": Q, "R": R, "dR": dR,
-        "models": models,
-        "profiles": profiles,
-        "chi_squared": latest.get("chi_squared"),
-        "method": latest.get("method"),
-        "converged": latest.get("converged"),
-        "parameters": params_list,
-        "issues": latest.get("issues", []),
-        "suggestions": latest.get("suggestions", []),
-    })
+    return jsonify(
+        {
+            "Q": Q,
+            "R": R,
+            "dR": dR,
+            "models": models,
+            "profiles": profiles,
+            "chi_squared": latest.get("chi_squared"),
+            "method": latest.get("method"),
+            "converged": latest.get("converged"),
+            "parameters": params_list,
+            "issues": latest.get("issues", []),
+            "suggestions": latest.get("suggestions", []),
+        }
+    )
 
 
 @bp.route("/api/user-feedback", methods=["POST"])
@@ -465,6 +500,8 @@ def api_user_feedback():
     body = request.get_json(silent=True) or {}
     action = (body.get("action") or "continue").strip()
     feedback_text = (body.get("feedback") or "").strip() or None
+    dream_steps = body.get("dream_steps")  # int or None
+    restart_checkpoint = body.get("restart_checkpoint")  # str or None
 
     with lock:
         if run_state.get("status") != "waiting_for_user":
@@ -478,11 +515,237 @@ def api_user_feedback():
             run_state["_stop_requested"] = True
             run_state["status"] = "running"
         else:
-            run_state["_user_feedback"] = feedback_text
+            # Build structured feedback payload
+            payload: dict | str | None = feedback_text
+            has_advanced = (dream_steps is not None) or restart_checkpoint
+            if has_advanced:
+                payload = {
+                    "feedback": feedback_text,
+                    "dream_steps": int(dream_steps) if dream_steps else None,
+                    "restart_checkpoint": restart_checkpoint or None,
+                }
+            run_state["_user_feedback"] = payload
 
         pause_event.set()
 
     return jsonify({"status": "ok"})
+
+
+@bp.route("/api/restart-analysis", methods=["POST"])
+def api_restart_analysis():
+    """
+    Restart an already-completed analysis with new user insight.
+
+    Expects JSON body::
+
+        {
+            "insight": "Try adding an oxide interlayer between Fe and Si",
+            "restart_from": "modeling"   // or "analysis"
+        }
+
+    The previous run's final state is loaded from disk, augmented with
+    the user's insight, and the workflow is relaunched from the chosen node.
+    """
+    lock: threading.Lock = current_app.config["RUN_LOCK"]
+    run_state: dict = current_app.config["RUN_STATE"]
+
+    with lock:
+        if run_state["status"] == "running":
+            return jsonify({"error": "An analysis is already running"}), 409
+
+    body = request.get_json(silent=True) or {}
+    insight = (body.get("insight") or "").strip()
+    restart_from = (body.get("restart_from") or "modeling").strip()
+    dream_steps = body.get("dream_steps")  # int or None
+    checkpoint_iteration = body.get("checkpoint_iteration")  # int or None
+
+    if not insight:
+        return jsonify({"errors": ["insight is required"]}), 400
+    if restart_from not in ("modeling", "analysis"):
+        return jsonify(
+            {"errors": ["restart_from must be 'modeling' or 'analysis'"]}
+        ), 400
+
+    # ---- Load the completed state from disk -----------------------
+    output_dir = current_app.config.get("OUTPUT_DIR")
+    if not output_dir or not Path(output_dir).exists():
+        return jsonify({"error": "No previous analysis output found"}), 404
+
+    rd = _run_data()
+    if not rd:
+        return jsonify({"error": "No previous analysis output found"}), 404
+
+    final_state = rd.get_final_state()
+    if not final_state:
+        return jsonify({"error": "Could not load final state from previous run"}), 404
+
+    # ---- Optionally load from a specific checkpoint ---------------
+    if checkpoint_iteration is not None:
+        cp_dir = Path(output_dir) / "checkpoints"
+        if cp_dir.exists():
+            # Find checkpoint file matching the requested iteration
+            import json as _json
+
+            cp_state = None
+            for cp_file in sorted(cp_dir.glob("*.json")):
+                try:
+                    cp_data = _json.loads(cp_file.read_text())
+                    cp_st = cp_data.get("state", cp_data)
+                    if cp_st.get("iteration") == int(checkpoint_iteration):
+                        cp_state = cp_st
+                        break
+                except Exception:
+                    continue
+            if cp_state:
+                final_state = cp_state
+            else:
+                return jsonify(
+                    {
+                        "error": f"Checkpoint for iteration {checkpoint_iteration} not found"
+                    }
+                ), 404
+
+    interactive = bool(body.get("interactive", False))
+
+    # ---- Prepare state for restart --------------------------------
+    from ..workflow.runner import prepare_state_for_restart
+
+    restarted_state = prepare_state_for_restart(
+        state=final_state,
+        user_insight=insight,
+        restart_from=restart_from,
+        extra_iterations=1,
+    )
+    restarted_state["output_dir"] = output_dir
+    if interactive:
+        restarted_state["interactive"] = True
+
+    # Apply DREAM steps override if specified
+    if dream_steps is not None:
+        restarted_state["fit_steps"] = int(dream_steps)
+        restarted_state["fit_burn"] = int(dream_steps)
+
+    # ---- Update run_info.json with restart metadata ---------------
+    import json
+    from datetime import datetime
+
+    run_info_path = Path(output_dir) / "run_info.json"
+    if run_info_path.exists():
+        run_info = json.loads(run_info_path.read_text())
+        restarts = run_info.setdefault("restarts", [])
+        restarts.append(
+            {
+                "restarted_at": datetime.now().isoformat(),
+                "restart_from": restart_from,
+                "insight": insight,
+                "iteration_at_restart": final_state.get("iteration", 0),
+            }
+        )
+        run_info_path.write_text(json.dumps(run_info, indent=2, default=str))
+
+    # ---- Reset run state and launch background thread -------------
+    with lock:
+        run_state.update(
+            {
+                "status": "running",
+                "output_dir": output_dir,
+                "current_node": None,
+                "iteration": restarted_state.get("iteration", 0),
+                "checkpoints": run_state.get("checkpoints", []),
+                "error": None,
+                "interactive": interactive,
+                "messages": [],
+                "restarted": True,
+                "restart_insight": insight,
+                "_pause_event": None,
+                "_user_feedback": None,
+                "_stop_requested": False,
+            }
+        )
+        # Preserve experimental data from previous run
+        if "Q" not in run_state and final_state.get("Q"):
+            run_state["Q"] = final_state["Q"]
+            run_state["R"] = final_state["R"]
+            run_state["dR"] = final_state.get("dR", [])
+        if final_state.get("fit_results"):
+            run_state["fit_results"] = list(final_state["fit_results"])
+
+    app = current_app._get_current_object()
+
+    def _run_restart_in_background():
+        from ..workflow.runner import run_workflow_with_checkpoints
+
+        def _checkpoint_cb(state, node_name):
+            with lock:
+                run_state["current_node"] = node_name
+                run_state["iteration"] = state.get("iteration", 0)
+                all_llm = state.get("llm_calls", [])
+                prev_count = sum(
+                    len(cp.get("llm_calls", [])) for cp in run_state["checkpoints"]
+                )
+                step_llm = all_llm[prev_count:]
+                run_state["checkpoints"].append(
+                    {
+                        "node": node_name,
+                        "iteration": state.get("iteration", 0),
+                        "chi2": state.get("current_chi2"),
+                        "llm_calls": step_llm,
+                    }
+                )
+                if state.get("fit_results"):
+                    run_state["fit_results"] = list(state["fit_results"])
+
+        pause_callback = None
+        if interactive:
+            pause_event = threading.Event()
+            with lock:
+                run_state["_pause_event"] = pause_event
+
+            def _pause_cb(state, node_name):
+                msgs = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in state.get("messages", [])
+                ]
+                with lock:
+                    run_state["status"] = "waiting_for_user"
+                    run_state["messages"] = msgs
+                    run_state["_user_feedback"] = None
+                    pause_event.clear()
+
+                pause_event.wait()
+
+                with lock:
+                    run_state["status"] = "running"
+                    feedback = run_state.get("_user_feedback")
+                    stop_requested = run_state.get("_stop_requested", False)
+                if stop_requested:
+                    return "__STOP__"
+                return feedback
+
+            pause_callback = _pause_cb
+
+        try:
+            run_workflow_with_checkpoints(
+                initial_state=restarted_state,
+                output_dir=output_dir,
+                checkpoint_callback=_checkpoint_cb,
+                start_node=restart_from,
+                pause_callback=pause_callback,
+            )
+            with lock:
+                run_state["status"] = "complete"
+            app.config["OUTPUT_DIR"] = output_dir
+        except Exception as exc:
+            with lock:
+                run_state["status"] = "error"
+                run_state["error"] = str(exc)
+
+    t = threading.Thread(target=_run_restart_in_background, daemon=True)
+    t.start()
+
+    return jsonify(
+        {"status": "restarted", "output_dir": output_dir, "restart_from": restart_from}
+    )
 
 
 @bp.route("/api/analysis-status")
@@ -492,7 +755,4 @@ def api_analysis_status():
     run_state: dict = current_app.config["RUN_STATE"]
     with lock:
         # Exclude internal objects from the JSON response
-        return jsonify({
-            k: v for k, v in run_state.items()
-            if not k.startswith("_")
-        })
+        return jsonify({k: v for k, v in run_state.items() if not k.startswith("_")})

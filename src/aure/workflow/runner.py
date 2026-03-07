@@ -7,6 +7,7 @@ This module provides functions for running the reflectivity analysis workflow:
 - run_from_checkpoint: Resume workflow from a saved checkpoint
 """
 
+import json as _json
 import logging
 from typing import Optional, Callable, Dict, Any
 from pathlib import Path
@@ -40,6 +41,29 @@ ROUTING_FUNCTIONS = {
     "fitting": routing.route_after_fitting,
     "evaluation": routing.route_after_evaluation,
 }
+
+
+def _load_checkpoint_by_iteration(
+    output_dir: Optional[str], iteration: int
+) -> Optional[Dict[str, Any]]:
+    """Load a checkpoint state by matching its iteration number.
+
+    Returns the checkpoint state dict, or *None* if not found.
+    """
+    if not output_dir:
+        return None
+    cp_dir = Path(output_dir) / "checkpoints"
+    if not cp_dir.exists():
+        return None
+    for cp_file in sorted(cp_dir.glob("*.json")):
+        try:
+            cp_data = _json.loads(cp_file.read_text())
+            cp_state = cp_data.get("state", cp_data)
+            if cp_state.get("iteration") == iteration:
+                return cp_state
+        except Exception:
+            continue
+    return None
 
 
 def run_analysis(
@@ -191,15 +215,59 @@ def run_workflow_with_checkpoints(
                 state["workflow_complete"] = True
                 break
             elif feedback:
-                state["pending_user_feedback"] = feedback
-                state["messages"] = state.get("messages", []) + [
-                    Message(
-                        role="user",
-                        content=feedback,
-                        timestamp=None,
+                # Handle structured feedback (dict with advanced options)
+                feedback_text = feedback
+                if isinstance(feedback, dict):
+                    feedback_text = feedback.get("feedback") or None
+                    if feedback.get("dream_steps"):
+                        state["fit_steps"] = int(feedback["dream_steps"])
+                        state["fit_burn"] = int(feedback["dream_steps"])
+                        logger.info(
+                            "[RUNNER] User set DREAM steps to %d", state["fit_steps"]
+                        )
+                    if feedback.get("restart_checkpoint"):
+                        # Load checkpoint state and merge relevant fields
+                        cp_iter = int(feedback["restart_checkpoint"])
+                        logger.info(
+                            "[RUNNER] User requested restart from checkpoint iteration %d",
+                            cp_iter,
+                        )
+                        cp_state = _load_checkpoint_by_iteration(
+                            state.get("output_dir"), cp_iter
+                        )
+                        if cp_state:
+                            # Restore model and fit state from checkpoint
+                            for key in (
+                                "current_model",
+                                "best_model",
+                                "best_chi2",
+                                "current_chi2",
+                                "iteration",
+                                "fit_results",
+                            ):
+                                if key in cp_state:
+                                    state[key] = cp_state[key]
+                            state["workflow_complete"] = False
+                            state["error"] = None
+                            logger.info(
+                                "[RUNNER] Restored state from checkpoint iteration %d",
+                                cp_iter,
+                            )
+
+                if feedback_text:
+                    state["pending_user_feedback"] = feedback_text
+                    state["messages"] = state.get("messages", []) + [
+                        Message(
+                            role="user",
+                            content=feedback_text,
+                            timestamp=None,
+                        )
+                    ]
+                    logger.info(
+                        "[RUNNER] Received user feedback: %s", feedback_text[:100]
                     )
-                ]
-                logger.info("[RUNNER] Received user feedback: %s", feedback[:100])
+                else:
+                    state["pending_user_feedback"] = None
             else:
                 state["pending_user_feedback"] = None
 
@@ -233,6 +301,68 @@ def run_workflow_with_checkpoints(
         checkpoint_mgr.save_final_state(state)
 
     return state
+
+
+def prepare_state_for_restart(
+    state: Dict[str, Any],
+    user_insight: str,
+    restart_from: str = "modeling",
+    extra_iterations: int = 1,
+) -> Dict[str, Any]:
+    """
+    Prepare a completed workflow state for restart with new user insight.
+
+    This resets completion/error flags, injects the user's new guidance
+    into the conversation, and grants additional iterations so the
+    refinement loop can run again.
+
+    Args:
+        state: A completed workflow state (e.g. loaded from final_state.json)
+        user_insight: Free-text guidance from the user describing what to
+            change or try differently.
+        restart_from: Node to restart from. ``"modeling"`` (default) re-builds
+            and re-fits the model.  ``"analysis"`` re-analyses features and
+            re-builds from scratch.
+        extra_iterations: Number of additional iterations to allow beyond
+            those already consumed (default: 3).
+
+    Returns:
+        A **new** state dict ready to be passed to
+        ``run_workflow_with_checkpoints(start_node=restart_from)``.
+    """
+    restart_from = restart_from if restart_from in NODE_ORDER else "modeling"
+    new_state = dict(state)
+
+    # ---- Clear completion / error flags ----------------------------
+    new_state["workflow_complete"] = False
+    new_state["error"] = None
+
+    # ---- Grant more iteration budget -------------------------------
+    used = new_state.get("iteration", 0)
+    new_state["max_iterations"] = used + extra_iterations
+
+    # ---- Inject insight as user feedback ---------------------------
+    new_state["pending_user_feedback"] = user_insight
+    new_state["messages"] = new_state.get("messages", []) + [
+        Message(
+            role="user",
+            content=f"[Restart with new insight] {user_insight}",
+            timestamp=None,
+        )
+    ]
+
+    # If restarting from analysis, also clear parsed sample / features
+    # so they are regenerated with the new insight in mind.
+    if restart_from == "analysis":
+        new_state["parsed_sample"] = None
+        new_state["extracted_features"] = None
+
+    logger.info(
+        "[RUNNER] State prepared for restart from '%s' with %d extra iterations",
+        restart_from,
+        extra_iterations,
+    )
+    return new_state
 
 
 def run_from_checkpoint(
