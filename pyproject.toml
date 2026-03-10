@@ -34,6 +34,9 @@ all = ["aure[dev,agent,alcf,export]"]
 where = ["src"]
 include = ["aure*"]
 
+[tool.setuptools.package-data]
+"aure.web" = ["templates/**/*", "static/**/*"]
+
 [project.scripts]
 aure = "aure.cli:main"
 

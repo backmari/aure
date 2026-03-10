@@ -56,7 +56,7 @@ or resume a run from any point.
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-org>/aure.git
+git clone https://github.com/neutrons-ai/aure.git
 cd aure
 
 # Create a virtual environment and install with the agent extras
@@ -70,6 +70,7 @@ pip install -e ".[agent]"
 | Extra     | What it adds                                      |
 |-----------|---------------------------------------------------|
 | `agent`   | LangGraph, LangChain, Click, FastMCP, periodictable — everything needed for the CLI and workflow |
+| `export`  | `nr-isaac-format` — ISAAC AI-Ready Data export    |
 | `alcf`    | `globus-sdk` — native Globus auth for ALCF inference endpoints |
 | `dev`     | pytest                                            |
 | `all`     | All of the above                                  |
@@ -274,6 +275,7 @@ aure serve OUTPUT_DIR [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `-p, --port N` | Port for the local server (default: 5000) |
+| `--host HOST` | Interface to bind to (default: `127.0.0.1`; use `0.0.0.0` inside Docker) |
 | `--no-browser` | Don't open a browser automatically |
 
 The viewer has two tabs:
@@ -324,3 +326,59 @@ result = run_analysis(
     output_dir="./results",
 )
 ```
+
+## Docker
+
+Pre-built images are published to the GitHub Container Registry on every push
+to `main` and on version tags (`ghcr.io/neutrons-ai/aure`).
+
+### Pull the image
+
+```bash
+docker pull ghcr.io/neutrons-ai/aure:latest
+```
+
+### Build locally
+
+```bash
+docker build -t aure .
+```
+
+### Run
+
+The working directory inside the container is `/work`. Mount your local data
+and output directories there. Supply environment variables via an `--env-file`
+(recommended) or individual `-e` flags.
+
+**Run an analysis**
+
+```bash
+docker run --rm \
+  --env-file .env \
+  -v /path/to/data:/work \
+  ghcr.io/neutrons-ai/aure:latest \
+  analyze data.txt "100 nm polystyrene on silicon" -o /work/output -v
+```
+
+**Launch the web viewer**
+
+```bash
+docker run --rm \
+  --env-file .env \
+  -v /path/to/output:/work/output \
+  -p 5000:5000 \
+  ghcr.io/neutrons-ai/aure:latest \
+  serve /work/output --host 0.0.0.0 --no-browser
+```
+
+Then open <http://localhost:5000> in your browser.
+
+**Minimal `.env` file**
+
+```bash
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o
+LLM_API_KEY=sk-...
+```
+
+See [.env.example](.env.example) for all available options.
