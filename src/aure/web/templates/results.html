@@ -71,6 +71,13 @@
           This assembles a manifest, copies the data and best-fit model, generates
           an LLM-written context description, and produces a validated record.
         </p>
+        <div class="mb-3">
+          <label for="export-user-context" class="form-label fw-semibold">
+            Additional Context <span class="text-muted fw-normal">(optional)</span>
+          </label>
+          <textarea id="export-user-context" class="form-control" rows="3"
+                    placeholder="Add any extra context about this dataset (e.g. experimental conditions, sample history). This will be prepended to the auto-generated context description."></textarea>
+        </div>
         <button id="btn-export" class="btn btn-success" type="button"
                 onclick="exportData()">
           <i class="bi bi-download"></i> Export
@@ -480,6 +487,15 @@ async function checkRunningStatus() {
 document.addEventListener("DOMContentLoaded", () => {
   checkRunningStatus();
   checkExportAvailability();
+
+  // Restore saved export context from localStorage
+  const savedCtx = localStorage.getItem("aure_export_user_context");
+  if (savedCtx) {
+    document.getElementById("export-user-context").value = savedCtx;
+  }
+  document.getElementById("export-user-context").addEventListener("input", (e) => {
+    localStorage.setItem("aure_export_user_context", e.target.value);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -507,9 +523,11 @@ async function exportData() {
   status.classList.add("d-none");
 
   try {
+    const userContext = (document.getElementById("export-user-context").value || "").trim();
     const resp = await fetch("/api/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_context: userContext || null }),
     });
     const data = await resp.json();
 

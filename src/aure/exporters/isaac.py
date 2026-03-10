@@ -198,6 +198,7 @@ class IsaacExporter(BaseExporter):
         output_dir: Path,
         state: dict,
         run_info: dict,
+        user_context: Optional[str] = None,
     ) -> ExportResult:
         errors: List[str] = []
         warnings: List[str] = []
@@ -238,6 +239,8 @@ class IsaacExporter(BaseExporter):
         # Step C – generate LLM context description
         # ------------------------------------------------------------------
         context_description = _generate_context_description(state)
+        if user_context:
+            context_description = user_context + "\n\n" + context_description
         context_file = ai_dir / "context.txt"
         context_file.write_text(context_description, encoding="utf-8")
         logger.info("[ISAAC-EXPORT] Wrote context description → %s", context_file)

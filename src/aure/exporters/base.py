@@ -7,7 +7,7 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional  # noqa: F401 – Optional used in subclasses
 
 
 @dataclass
@@ -39,6 +39,7 @@ class BaseExporter(abc.ABC):
         output_dir: Path,
         state: dict,
         run_info: dict,
+        user_context: Optional[str] = None,
     ) -> ExportResult:
         """
         Perform the export.
@@ -51,6 +52,9 @@ class BaseExporter(abc.ABC):
             The final workflow state dict (from ``final_state.json``).
         run_info:
             Contents of ``run_info.json``.
+        user_context:
+            Optional free-text context provided by the user, prepended
+            to any auto-generated context description.
 
         Returns
         -------

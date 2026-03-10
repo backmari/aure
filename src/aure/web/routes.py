@@ -795,6 +795,9 @@ def api_export():
     if exporter is None:
         return jsonify({"error": "No exporter configured"}), 400
 
+    body = request.get_json(silent=True) or {}
+    user_context = (body.get("user_context") or "").strip() or None
+
     output_dir = current_app.config.get("OUTPUT_DIR")
     if not output_dir or not Path(output_dir).exists():
         return jsonify({"error": "No analysis output found"}), 404
@@ -819,6 +822,7 @@ def api_export():
             output_dir=Path(output_dir),
             state=state,
             run_info=run_info,
+            user_context=user_context,
         )
         return jsonify(
             {
