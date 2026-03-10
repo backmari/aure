@@ -357,6 +357,60 @@ class RunData:
         except Exception:
             return {}
 
+    # ------------------------------------------------------------------
+    # Simulation
+    # ------------------------------------------------------------------
+
+    def simulate(self, parameters: Dict[str, float]) -> dict:
+        """Compute reflectivity, SLD, and chi² for user-specified parameters.
+
+        Uses the latest fitting model script from disk, applies the given
+        parameter values, then computes curves via refl1d.
+
+        Returns ``{"Q_fit", "R_fit", "sld_z", "sld_rho", "chi_squared"}``.
+        """
+        state = self.get_final_state()
+        models_dir = self.output_dir / "models"
+
+        # Find the latest model file that has .range() constraints
+        fit_results = state.get("fit_results", [])
+        model_file = None
+        for fr in reversed(fit_results):
+            iteration = fr.get("iteration", 0)
+            candidate = models_dir / f"model_fitting_iter{iteration}.py"
+            if candidate.exists():
+                model_file = candidate
+                break
+        # Fallback to model_final.py
+        if model_file is None:
+            model_file = models_dir / "model_final.py"
+        if not model_file.exists():
+            return {"error": "No model file found"}
+
+        Q_data = np.array(state.get("Q", []))
+
+        try:
+            result = _execute_model_file(
+                model_file,
+                Q_data,
+                working_dir=self.output_dir.parent,
+                fitted_parameters=parameters,
+                compute_reflectivity=True,
+            )
+        except Exception as exc:
+            return {"error": str(exc)}
+
+        if result is None:
+            return {"error": "Model execution returned no result"}
+
+        return {
+            "Q_fit": result.get("Q_fit") or [],
+            "R_fit": result.get("R_fit") or [],
+            "sld_z": result.get("z") or [],
+            "sld_rho": result.get("sld") or [],
+            "chi_squared": result.get("chi_squared"),
+        }
+
 
 # ======================================================================
 # Model-file execution helper  (adapted from cli.py)
@@ -368,6 +422,7 @@ def _execute_model_file(
     Q_data: np.ndarray,
     working_dir: Optional[Path] = None,
     fitted_parameters: Optional[Dict[str, float]] = None,
+    compute_reflectivity: bool = False,
 ) -> Optional[dict]:
     """Execute a refl1d model script and extract SLD profile.
 
@@ -379,6 +434,9 @@ def _execute_model_file(
         resulting ``FitProblem`` are updated to these values so that the
         SLD profile reflects the actual fit result rather than the
         (possibly arbitrary) defaults in the script.
+    compute_reflectivity
+        If *True*, also compute the reflectivity curve and chi² from the
+        model with the current parameter values.
     """
     original_cwd = os.getcwd()
     try:
@@ -413,9 +471,13 @@ def _execute_model_file(
 
                 tmp_problem = FitProblem(experiment)
                 _apply_fitted_parameters(tmp_problem, fitted_parameters)
+                problem = tmp_problem
             except Exception:
                 pass
 
+        result: Dict[str, Any] = {}
+
+        # ---- SLD profile --------------------------------------------
         z, sld = None, None
         try:
             z_arr, sld_arr, _ = experiment.smooth_profile(dz=1.0)
@@ -423,8 +485,28 @@ def _execute_model_file(
             sld = np.array(sld_arr).tolist()
         except Exception:
             pass
+        result["z"] = z
+        result["sld"] = sld
 
-        return {"z": z, "sld": sld}
+        # ---- Reflectivity + chi² (optional) -------------------------
+        if compute_reflectivity:
+            try:
+                experiment.update()
+                Q_arr, R_arr = experiment.reflectivity()
+                result["Q_fit"] = np.array(Q_arr).tolist()
+                result["R_fit"] = np.array(R_arr).tolist()
+            except Exception:
+                result["Q_fit"] = None
+                result["R_fit"] = None
+            try:
+                if problem is not None:
+                    result["chi_squared"] = float(problem.chisq())
+                else:
+                    result["chi_squared"] = None
+            except Exception:
+                result["chi_squared"] = None
+
+        return result
     except Exception as exc:
         raise RuntimeError(f"Model execution failed: {exc}") from exc
     finally:

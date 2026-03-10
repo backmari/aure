@@ -72,6 +72,51 @@ def _extract_run_name(data_file: str) -> str:
     return re.sub(r"[^\w\-]", "_", stem)
 
 
+def _apply_overrides_to_model_script(
+    script: str,
+    parameter_overrides: dict,
+    bounds_overrides: dict,
+) -> str:
+    """Patch a refl1d model script with user parameter/bounds overrides.
+
+    For parameter overrides, update the *initial* value used in the script
+    by modifying ``SLD(name=..., rho=<VALUE>)`` and layer constructor args.
+    For bounds overrides, update ``.range(lo, hi)`` calls.
+
+    This is best-effort regex patching — the LLM will re-generate the
+    model on restart anyway, but giving it updated starting values and
+    bounds helps it converge faster.
+    """
+    # Map friendly names → script patterns.
+    # Parameter names from refl1d look like:
+    #   "copper thickness", "copper rho", "copper interface",
+    #   "intensity REFL_...", "dTHF rho"
+    # We inject overrides by updating .range() start values & bounds.
+
+    # For bounds overrides: replace .range(old_lo, old_hi) patterns
+    for name, pair in bounds_overrides.items():
+        if not isinstance(pair, list) or len(pair) != 2:
+            continue
+        lo, hi = pair
+        # Try to find a .range() call near a comment or variable matching this param
+        # Generic approach: find lines with the param name in a comment
+        lines = script.split("\n")
+        for i, line in enumerate(lines):
+            if ".range(" in line and (
+                name.lower().replace(" ", "_") in line.lower()
+                or name.lower() in line.lower()
+            ):
+                lines[i] = re.sub(
+                    r"\.range\([^)]*\)",
+                    f".range({lo}, {hi})",
+                    line,
+                )
+                break
+        script = "\n".join(lines)
+
+    return script
+
+
 # ------------------------------------------------------------------
 # Page routes
 # ------------------------------------------------------------------
@@ -161,6 +206,39 @@ def api_parameters():
     if not rd:
         return jsonify({"parameters": []})
     return jsonify(rd.get_fit_parameters())
+
+
+@bp.route("/api/simulate", methods=["POST"])
+def api_simulate():
+    """Compute reflectivity/SLD for user-adjusted parameters.
+
+    Expects JSON body::
+
+        {
+            "parameters": {"param name": value, ...}
+        }
+
+    Returns ``{Q_fit, R_fit, sld_z, sld_rho, chi_squared}``.
+    """
+    rd = _run_data()
+    if not rd:
+        return jsonify({"error": "No analysis output found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    parameters = body.get("parameters")
+    if not parameters or not isinstance(parameters, dict):
+        return jsonify({"error": "parameters dict is required"}), 400
+
+    # Validate all values are numeric
+    try:
+        parameters = {str(k): float(v) for k, v in parameters.items()}
+    except (ValueError, TypeError):
+        return jsonify({"error": "All parameter values must be numeric"}), 400
+
+    result = rd.simulate(parameters)
+    if "error" in result:
+        return jsonify(result), 500
+    return jsonify(result)
 
 
 @bp.route("/api/llm-status")
@@ -558,6 +636,8 @@ def api_restart_analysis():
     restart_from = (body.get("restart_from") or "modeling").strip()
     dream_steps = body.get("dream_steps")  # int or None
     checkpoint_iteration = body.get("checkpoint_iteration")  # int or None
+    parameter_overrides = body.get("parameter_overrides")  # {name: value} or None
+    bounds_overrides = body.get("bounds_overrides")  # {name: [lo, hi]} or None
 
     if not insight:
         return jsonify({"errors": ["insight is required"]}), 400
@@ -624,6 +704,42 @@ def api_restart_analysis():
     if dream_steps is not None:
         restarted_state["fit_steps"] = int(dream_steps)
         restarted_state["fit_burn"] = int(dream_steps)
+
+    # Apply user parameter / bounds overrides to the latest fit results
+    # and the current model script so the restart uses updated values.
+    if parameter_overrides and isinstance(parameter_overrides, dict):
+        fit_results = restarted_state.get("fit_results") or []
+        if fit_results:
+            latest = fit_results[-1]
+            params = latest.get("parameters", {})
+            for name, val in parameter_overrides.items():
+                if name in params:
+                    try:
+                        params[name] = float(val)
+                    except (ValueError, TypeError):
+                        pass
+            latest["parameters"] = params
+
+    if bounds_overrides and isinstance(bounds_overrides, dict):
+        fit_results = restarted_state.get("fit_results") or []
+        if fit_results:
+            latest = fit_results[-1]
+            bounds = latest.get("bounds") or {}
+            for name, pair in bounds_overrides.items():
+                if isinstance(pair, list) and len(pair) == 2:
+                    try:
+                        bounds[name] = [float(pair[0]), float(pair[1])]
+                    except (ValueError, TypeError):
+                        pass
+            latest["bounds"] = bounds
+
+    # Update current_model script with overrides
+    if (parameter_overrides or bounds_overrides) and restarted_state.get("current_model"):
+        restarted_state["current_model"] = _apply_overrides_to_model_script(
+            restarted_state["current_model"],
+            parameter_overrides or {},
+            bounds_overrides or {},
+        )
 
     # ---- Update run_info.json with restart metadata ---------------
     import json

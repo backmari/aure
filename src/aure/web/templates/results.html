@@ -32,9 +32,14 @@
 <div class="row">
   <div class="col">
     <div class="card">
-      <div class="card-header fw-semibold">
-        <i class="bi bi-table"></i> Fit Parameters
-        <span id="fit-summary" class="float-end text-muted small"></span>
+      <div class="card-header fw-semibold d-flex align-items-center">
+        <span><i class="bi bi-table"></i> Fit Parameters</span>
+        <span id="fit-summary" class="text-muted small ms-auto me-2"></span>
+        <span id="sim-chi2" class="badge bg-info d-none me-2"></span>
+        <span id="sim-spinner" class="spinner-border spinner-border-sm text-secondary d-none me-2" role="status"></span>
+        <button id="btn-reset-params" class="btn btn-outline-secondary btn-sm d-none" onclick="resetParameters()">
+          <i class="bi bi-arrow-counterclockwise"></i> Reset
+        </button>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -42,9 +47,11 @@
             <thead class="table-light">
               <tr>
                 <th>Parameter</th>
-                <th class="text-end">Value</th>
-                <th class="text-end">Uncertainty (±)</th>
-                <th style="min-width:140px">Range</th>
+                <th class="text-end" style="width:100px">Value</th>
+                <th style="min-width:200px">Slider</th>
+                <th class="text-end" style="width:70px">Lo</th>
+                <th class="text-end" style="width:70px">Hi</th>
+                <th class="text-end" style="width:90px">Uncertainty</th>
               </tr>
             </thead>
             <tbody id="param-table-body"></tbody>
@@ -307,47 +314,27 @@ function renderSLD(data) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Parameter range indicator                                         */
+/*  Interactive parameter editor state                                */
 /* ------------------------------------------------------------------ */
-function buildRangeIndicator(p) {
-  if (!p.bounds || p.bounds.length < 2) return '<span class="text-muted small">—</span>';
+// Stores {name: {value, lo, hi, originalValue, originalLo, originalHi, uncertainty}}
+let _paramState = {};
+let _simTimer = null;
+let _simInFlight = false;
+let _userModified = false;  // true when any param differs from original
 
-  const lo = p.bounds[0], hi = p.bounds[1];
-  const range = hi - lo;
-  if (range <= 0) return '<span class="text-muted small">—</span>';
+function _sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9_]/g, "_");
+}
 
-  const pct = Math.max(0, Math.min(100, ((p.value - lo) / range) * 100));
-
-  // Color: red near edges (< 5% or > 95%), amber (5-15% / 85-95%), green in middle
-  let color = "#198754"; // green
-  let label = "";
-  if (pct <= 5 || pct >= 95) {
-    color = "#dc3545"; // red
-    label = "at boundary";
-  } else if (pct <= 15 || pct >= 85) {
-    color = "#fd7e14"; // amber
-    label = "near boundary";
-  }
-
-  const loLabel = lo.toPrecision(3);
-  const hiLabel = hi.toPrecision(3);
-  const tooltip = `${loLabel} — ${p.value.toPrecision(5)} — ${hiLabel}` +
-    (label ? ` (${label})` : "");
-
-  // Build a compact bar: track + marker
-  return `<div class="d-flex align-items-center gap-1" title="${tooltip}" style="cursor:help">
-    <span class="text-muted" style="font-size:.65rem;min-width:32px;text-align:right">${loLabel}</span>
-    <div style="position:relative;flex:1;height:8px;background:#e9ecef;border-radius:4px;min-width:60px">
-      <div style="position:absolute;left:${pct}%;top:50%;transform:translate(-50%,-50%);
-                  width:10px;height:10px;border-radius:50%;background:${color};
-                  border:1.5px solid #fff;box-shadow:0 0 0 1px ${color}40"></div>
-    </div>
-    <span class="text-muted" style="font-size:.65rem;min-width:32px">${hiLabel}</span>
-  </div>`;
+/** Format a number to a sensible number of significant digits. */
+function _fmtNum(v, sigFigs) {
+  if (v === 0) return "0";
+  sigFigs = sigFigs || 5;
+  return Number(v.toPrecision(sigFigs));
 }
 
 /* ------------------------------------------------------------------ */
-/*  Parameter table                                                   */
+/*  Parameter table (interactive)                                     */
 /* ------------------------------------------------------------------ */
 function renderParams(data) {
   const tbody = document.getElementById("param-table-body");
@@ -366,20 +353,265 @@ function renderParams(data) {
   if (data.converged != null) parts.push(data.converged ? "converged ✓" : "not converged ✗");
   summary.textContent = parts.join("  ·  ");
 
+  _paramState = {};
+
   data.parameters.forEach((p) => {
-    const val = typeof p.value === "number" ? p.value.toPrecision(5) : p.value;
-    const unc = p.uncertainty != null ? `± ${p.uncertainty.toPrecision(3)}` : "—";
-    const rangeHtml = buildRangeIndicator(p);
-    tbody.insertAdjacentHTML(
-      "beforeend",
-      `<tr>
-         <td><code>${p.name}</code></td>
-         <td class="text-end">${val}</td>
-         <td class="text-end">${unc}</td>
-         <td>${rangeHtml}</td>
+    const name = p.name;
+    const safe = _sanitizeName(name);
+    const val = typeof p.value === "number" ? p.value : 0;
+    const lo = (p.bounds && p.bounds.length >= 2) ? p.bounds[0] : val - Math.abs(val) * 0.5;
+    const hi = (p.bounds && p.bounds.length >= 2) ? p.bounds[1] : val + Math.abs(val) * 0.5;
+    const unc = p.uncertainty;
+
+    _paramState[name] = {
+      value: val, lo: lo, hi: hi,
+      originalValue: val, originalLo: lo, originalHi: hi,
+      uncertainty: unc,
+    };
+
+    const step = (hi - lo) / 1000;
+    const uncText = unc != null ? `± ${unc.toPrecision(3)}` : "—";
+
+    tbody.insertAdjacentHTML("beforeend",
+      `<tr data-param="${name}">
+         <td><code>${name}</code></td>
+         <td class="text-end">
+           <input type="number" class="form-control form-control-sm text-end param-value-input"
+                  id="val-${safe}" step="any" value="${_fmtNum(val)}"
+                  style="width:100px" data-param="${name}" />
+         </td>
+         <td>
+           <input type="range" class="form-range param-slider"
+                  id="slider-${safe}" min="${lo}" max="${hi}" step="${step}" value="${val}"
+                  data-param="${name}" />
+         </td>
+         <td class="text-end">
+           <input type="number" class="form-control form-control-sm text-end param-bound-input"
+                  id="lo-${safe}" step="any" value="${_fmtNum(lo, 4)}"
+                  style="width:70px" data-param="${name}" data-bound="lo" />
+         </td>
+         <td class="text-end">
+           <input type="number" class="form-control form-control-sm text-end param-bound-input"
+                  id="hi-${safe}" step="any" value="${_fmtNum(hi, 4)}"
+                  style="width:70px" data-param="${name}" data-bound="hi" />
+         </td>
+         <td class="text-end text-muted small">${uncText}</td>
        </tr>`
     );
   });
+
+  // Attach event listeners
+  document.querySelectorAll(".param-slider").forEach((slider) => {
+    slider.addEventListener("input", onSliderChange);
+  });
+  document.querySelectorAll(".param-value-input").forEach((input) => {
+    input.addEventListener("change", onValueInputChange);
+  });
+  document.querySelectorAll(".param-bound-input").forEach((input) => {
+    input.addEventListener("change", onBoundChange);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Parameter change handlers                                         */
+/* ------------------------------------------------------------------ */
+function onSliderChange(e) {
+  const name = e.target.dataset.param;
+  const val = parseFloat(e.target.value);
+  const safe = _sanitizeName(name);
+  _paramState[name].value = val;
+  document.getElementById(`val-${safe}`).value = _fmtNum(val);
+  _markModified();
+  _debouncedSimulate();
+}
+
+function onValueInputChange(e) {
+  const name = e.target.dataset.param;
+  let val = parseFloat(e.target.value);
+  if (isNaN(val)) return;
+  const ps = _paramState[name];
+  // Clamp to bounds
+  val = Math.max(ps.lo, Math.min(ps.hi, val));
+  e.target.value = _fmtNum(val);
+  ps.value = val;
+  const safe = _sanitizeName(name);
+  document.getElementById(`slider-${safe}`).value = val;
+  _markModified();
+  _debouncedSimulate();
+}
+
+function onBoundChange(e) {
+  const name = e.target.dataset.param;
+  const bound = e.target.dataset.bound;
+  const val = parseFloat(e.target.value);
+  if (isNaN(val)) return;
+  const ps = _paramState[name];
+  const safe = _sanitizeName(name);
+  const slider = document.getElementById(`slider-${safe}`);
+
+  if (bound === "lo") {
+    ps.lo = val;
+    slider.min = val;
+  } else {
+    ps.hi = val;
+    slider.max = val;
+  }
+  slider.step = (ps.hi - ps.lo) / 1000;
+
+  // Clamp value to new bounds
+  if (ps.value < ps.lo) {
+    ps.value = ps.lo;
+    slider.value = ps.lo;
+    document.getElementById(`val-${safe}`).value = _fmtNum(ps.lo);
+  }
+  if (ps.value > ps.hi) {
+    ps.value = ps.hi;
+    slider.value = ps.hi;
+    document.getElementById(`val-${safe}`).value = _fmtNum(ps.hi);
+  }
+  _markModified();
+  _debouncedSimulate();
+}
+
+function _markModified() {
+  _userModified = true;
+  document.getElementById("btn-reset-params").classList.remove("d-none");
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset parameters                                                  */
+/* ------------------------------------------------------------------ */
+function resetParameters() {
+  for (const [name, ps] of Object.entries(_paramState)) {
+    const safe = _sanitizeName(name);
+    ps.value = ps.originalValue;
+    ps.lo = ps.originalLo;
+    ps.hi = ps.originalHi;
+    document.getElementById(`val-${safe}`).value = _fmtNum(ps.originalValue);
+    document.getElementById(`slider-${safe}`).min = ps.originalLo;
+    document.getElementById(`slider-${safe}`).max = ps.originalHi;
+    document.getElementById(`slider-${safe}`).step = (ps.originalHi - ps.originalLo) / 1000;
+    document.getElementById(`slider-${safe}`).value = ps.originalValue;
+    document.getElementById(`lo-${safe}`).value = _fmtNum(ps.originalLo, 4);
+    document.getElementById(`hi-${safe}`).value = _fmtNum(ps.originalHi, 4);
+  }
+  _userModified = false;
+  document.getElementById("btn-reset-params").classList.add("d-none");
+  document.getElementById("sim-chi2").classList.add("d-none");
+
+  // Remove "User" traces from charts
+  _removeUserTraces("rq-chart");
+  _removeUserTraces("sld-chart");
+}
+
+function _removeUserTraces(chartId) {
+  const el = document.getElementById(chartId);
+  if (!el || !el.data) return;
+  const indices = [];
+  el.data.forEach((t, i) => { if (t.name === "User") indices.push(i); });
+  if (indices.length) Plotly.deleteTraces(el, indices);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Debounced simulation                                              */
+/* ------------------------------------------------------------------ */
+function _debouncedSimulate() {
+  if (_simTimer) clearTimeout(_simTimer);
+  _simTimer = setTimeout(_runSimulation, 300);
+}
+
+async function _runSimulation() {
+  if (_simInFlight) {
+    // Queue another run after the current one finishes
+    _simTimer = setTimeout(_runSimulation, 100);
+    return;
+  }
+  _simInFlight = true;
+  document.getElementById("sim-spinner").classList.remove("d-none");
+
+  const params = {};
+  for (const [name, ps] of Object.entries(_paramState)) {
+    params[name] = ps.value;
+  }
+
+  try {
+    const resp = await fetch("/api/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parameters: params }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      console.warn("Simulate error:", data.error);
+      return;
+    }
+    _updateChartsWithSimulation(data);
+  } catch (err) {
+    console.warn("Simulate fetch error:", err);
+  } finally {
+    _simInFlight = false;
+    document.getElementById("sim-spinner").classList.add("d-none");
+  }
+}
+
+function _updateChartsWithSimulation(data) {
+  // Update chi² badge
+  const chi2Badge = document.getElementById("sim-chi2");
+  if (data.chi_squared != null) {
+    chi2Badge.textContent = `χ² = ${data.chi_squared.toFixed(2)}`;
+    chi2Badge.classList.remove("d-none");
+  }
+
+  // R(Q) chart — add/update "User" trace
+  const rqEl = document.getElementById("rq-chart");
+  if (rqEl && rqEl.data && data.Q_fit && data.Q_fit.length) {
+    const userTrace = {
+      x: data.Q_fit, y: data.R_fit,
+      mode: "lines",
+      line: { width: 2.5, color: "#000", dash: "dash" },
+      name: "User",
+    };
+    const idx = rqEl.data.findIndex(t => t.name === "User");
+    if (idx >= 0) {
+      Plotly.restyle(rqEl, { x: [userTrace.x], y: [userTrace.y] }, [idx]);
+    } else {
+      Plotly.addTraces(rqEl, userTrace);
+    }
+  }
+
+  // SLD chart — add/update "User" trace
+  const sldEl = document.getElementById("sld-chart");
+  if (sldEl && sldEl.data && data.sld_z && data.sld_z.length) {
+    const userTrace = {
+      x: data.sld_z, y: data.sld_rho,
+      mode: "lines",
+      line: { width: 2.5, color: "#000", dash: "dash" },
+      name: "User",
+    };
+    const idx = sldEl.data.findIndex(t => t.name === "User");
+    if (idx >= 0) {
+      Plotly.restyle(sldEl, { x: [userTrace.x], y: [userTrace.y] }, [idx]);
+    } else {
+      Plotly.addTraces(sldEl, userTrace);
+    }
+  }
+}
+
+/** Collect user-modified parameters and bounds for the restart API. */
+function getParameterOverrides() {
+  if (!_userModified) return {};
+  const paramOverrides = {};
+  const boundsOverrides = {};
+  for (const [name, ps] of Object.entries(_paramState)) {
+    if (ps.value !== ps.originalValue) paramOverrides[name] = ps.value;
+    if (ps.lo !== ps.originalLo || ps.hi !== ps.originalHi) {
+      boundsOverrides[name] = [ps.lo, ps.hi];
+    }
+  }
+  const result = {};
+  if (Object.keys(paramOverrides).length) result.parameter_overrides = paramOverrides;
+  if (Object.keys(boundsOverrides).length) result.bounds_overrides = boundsOverrides;
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,6 +636,7 @@ async function restartAnalysis() {
   const payload = {
     insight,
     restart_from: restartFrom,
+    ...getParameterOverrides(),
   };
   const dreamStepsEl = document.getElementById("restart-dream-steps");
   if (dreamStepsEl && dreamStepsEl.value) {
