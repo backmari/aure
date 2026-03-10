@@ -58,6 +58,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Cache layers in the registry to speed up subsequent builds
+          # Cache layers using the GitHub Actions cache to speed up subsequent builds
           cache-from: type=gha
           cache-to: type=gha,mode=max
