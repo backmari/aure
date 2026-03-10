@@ -1929,7 +1929,11 @@ def mcp_server(transport: str, port: int):
     "--host",
     default="127.0.0.1",
     show_default=True,
-    help="Interface to bind to. Use 0.0.0.0 to listen on all interfaces (e.g. inside Docker).",
+    help=(
+        "Interface to bind to. Use 0.0.0.0 to listen on all interfaces "
+        "(e.g. inside Docker). Only use this on trusted networks or behind "
+        "proper network controls, as the web UI is not authenticated."
+    ),
 )
 @click.option(
     "--no-browser",
@@ -1999,7 +2003,12 @@ def serve(output_dir: Optional[str], port: int, host: str, no_browser: bool):
     "--host",
     default="127.0.0.1",
     show_default=True,
-    help="Interface to bind to. Use 0.0.0.0 to listen on all interfaces (e.g. inside Docker).",
+    help=(
+        "Interface to bind to. Use 0.0.0.0 to listen on all interfaces "
+        "(e.g. inside Docker). Warning: this exposes the unauthenticated "
+        "web UI/API and should only be used with appropriate network "
+        "restrictions."
+    ),
 )
 def interactive(data_file: Optional[str], port: int, host: str):
     """
