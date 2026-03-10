@@ -279,8 +279,30 @@ The viewer has two tabs:
 - **History** — step-by-step checkpoint timeline and an interactive χ²
   progression chart (Plotly.js, zoomable).
 - **Results** — log-log R(Q) plot with experimental data and model curves
-  (zoomable/pannable), SLD depth profile, and a table of best-fit parameters
-  with uncertainties.
+  (zoomable/pannable), SLD depth profile, interactive parameter editing, and
+  ISAAC AI-Ready Data export.
+
+#### Interactive parameter editor
+
+The Results tab includes an interactive parameter table where you can:
+
+- **Slide** parameter values with range sliders bounded by the fit limits
+- **Type** exact values into number inputs
+- **Edit bounds** (Lo / Hi) to widen or narrow allowed ranges
+- **See live updates** — reflectivity and SLD curves are recalculated in
+  real time (debounced, via the Refl1D engine) and overlaid as a dashed
+  "User" trace on the plots, with a live χ² readout
+- **Reset** all parameters to their fitted values with one click
+- **Restart analysis** — modified parameters and bounds are carried into a
+  new fitting run when you click *Restart Analysis*
+
+#### ISAAC export
+
+Click **Export → ISAAC AI-Ready Format** to produce a validated
+[ISAAC](https://github.com/isaac-neutrons/nr-isaac-format) record.  A text
+box lets you add free-text context about the measurement; this context is
+persisted in the browser across sessions and prepended to the LLM-generated
+context description in the exported manifest.
 
 ```bash
 aure serve ./output
@@ -299,48 +321,4 @@ result = run_analysis(
     max_iterations=5,
     output_dir="./results",
 )
-```
-
-## Project layout
-
-```
-.env.example            # Environment variable reference
-manifest.example.yaml   # Batch manifest reference
-src/aure/
-├── cli.py              # Click CLI (entry point)
-├── mcp_server.py       # FastMCP server
-├── state.py            # Workflow state definitions
-├── database/
-│   └── materials.py    # Material SLD lookups (periodictable)
-├── llm/                # LLM abstraction layer
-│   ├── config.py       # Env-var configuration & availability
-│   ├── timeout.py      # Signal-based call timeout
-│   └── providers/      # One module per backend
-│       ├── openai.py
-│       ├── gemini.py
-│       ├── alcf.py     # Argonne ALCF inference endpoints
-│       └── local.py    # Ollama / LM Studio / vLLM
-├── nodes/
-│   ├── intake.py       # Data loading & sample parsing
-│   ├── analysis.py     # Feature extraction
-│   ├── modeling.py     # Refl1D model generation
-│   ├── fitting.py      # Model fitting
-│   ├── evaluation.py   # Fit quality evaluation
-│   ├── refinement.py   # Model refinement
-│   ├── routing.py      # Workflow routing decisions
-│   └── prompts.py      # LLM prompt templates
-├── tools/
-│   ├── data_tools.py   # Reflectivity data I/O
-│   └── feature_tools.py# Physics feature extraction
-├── web/                # Flask results viewer
-│   ├── __init__.py     # create_app() factory
-│   ├── data.py         # RunData – checkpoint/model reader
-│   ├── routes.py       # Blueprint (pages + JSON API)
-│   ├── templates/      # Jinja2 (base, history, results)
-│   └── static/         # CSS
-└── workflow/
-    ├── graph.py        # LangGraph workflow definition
-    ├── runner.py       # Execution orchestration
-    ├── checkpoints.py  # Checkpoint save/load
-    └── tracing.py      # LangSmith tracing support
 ```

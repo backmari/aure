@@ -13,7 +13,7 @@ authors = [{ name = "Oak Ridge National Laboratory" }]
 dependencies = ["flask>=3.0", "numpy>=1.24", "scipy>=1.10", "refl1d>=1.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
 agent = [
   "langgraph>=1.0",
   "langchain>=1.0",
@@ -41,4 +41,17 @@ aure = "aure.cli:main"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v"
+addopts = "-v --cov=aure --cov-report=term-missing --cov-report=html:htmlcov"
+
+[tool.coverage.run]
+source = ["src/aure"]
+omit = ["src/aure/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
