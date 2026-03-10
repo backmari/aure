@@ -1,6 +1,7 @@
+---
 name: Tests
 
-on:
+"on":
   push:
     branches: [main]
   pull_request:
@@ -28,7 +29,10 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          python -m pytest tests/ --cov=aure --cov-report=term-missing --cov-report=xml
+          python -m pytest tests/ \
+            --cov=aure \
+            --cov-report=term-missing \
+            --cov-report=xml
 
       - name: Upload coverage report
         if: matrix.python-version == '3.12'

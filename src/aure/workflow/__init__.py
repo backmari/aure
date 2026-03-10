@@ -12,7 +12,7 @@ Key functions:
 
 Example usage:
     from aure.workflow import run_analysis
-    
+
     result = run_analysis(
         data_file="data/sample.ort",
         sample_description="Ni thin film on silicon substrate",
@@ -49,7 +49,7 @@ __all__ = [
     "create_workflow_app",
     # Workflow execution
     "run_analysis",
-    "run_workflow_with_checkpoints", 
+    "run_workflow_with_checkpoints",
     "run_from_checkpoint",
     "NODE_ORDER",
     "NODE_FUNCTIONS",

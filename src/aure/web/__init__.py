@@ -25,11 +25,11 @@ from .routes import bp
 def _default_run_state() -> dict:
     """Return a fresh run-state dict."""
     return {
-        "status": "idle",       # idle | running | complete | error
+        "status": "idle",  # idle | running | complete | error
         "output_dir": None,
         "current_node": None,
         "iteration": 0,
-        "checkpoints": [],      # [{node, chi2, timestamp}]
+        "checkpoints": [],  # [{node, chi2, timestamp}]
         "error": None,
     }
 

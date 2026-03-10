@@ -6,13 +6,14 @@ with known parameters, then tests if features can be recovered.
 """
 
 import numpy as np
-from aure.tools.feature_tools import extract_all_features, format_features_for_llm
+from aure.tools.feature_tools import extract_all_features
 from aure.database.materials import lookup_material
 
 
 # ---------------------------------------------------------------------------
 # Synthetic reflectivity (Parratt recursion, numpy only)
 # ---------------------------------------------------------------------------
+
 
 def _parratt(Q, sld, thickness, roughness):
     """
@@ -89,10 +90,11 @@ def generate_synthetic_curve(n_layers, Q, params):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_0_layer():
     """Test feature extraction on Fresnel reflectivity (0 layers)."""
     params = {
-        "substrate_sld": 2.07,      # Silicon
+        "substrate_sld": 2.07,  # Silicon
         "substrate_roughness": 3.0,
     }
 
@@ -117,8 +119,8 @@ def test_0_layer():
 def test_1_layer():
     """Test feature extraction on a 1-layer system (100 nm polymer on Si)."""
     params = {
-        "d1": 1000.0,               # 1000 Å = 100 nm
-        "sld1": 1.5,                # polymer
+        "d1": 1000.0,  # 1000 Å = 100 nm
+        "sld1": 1.5,  # polymer
         "rough1": 5.0,
         "substrate_sld": 2.07,
         "substrate_roughness": 3.0,
@@ -136,7 +138,9 @@ def test_1_layer():
             / params["d1"]
             * 100
         )
-        assert thickness_error < 20, f"Thickness error too large: {thickness_error:.1f}%"
+        assert thickness_error < 20, (
+            f"Thickness error too large: {thickness_error:.1f}%"
+        )
 
 
 def test_2_layer():
@@ -161,12 +165,12 @@ def test_2_layer():
     # Total thickness estimate should be in the right ballpark
     if features["estimated_total_thickness"]:
         thickness_error = (
-            abs(features["estimated_total_thickness"] - true_total)
-            / true_total
-            * 100
+            abs(features["estimated_total_thickness"] - true_total) / true_total * 100
         )
         # 2-layer beating makes thickness harder; use a generous tolerance
-        assert thickness_error < 50, f"Thickness error too large: {thickness_error:.1f}%"
+        assert thickness_error < 50, (
+            f"Thickness error too large: {thickness_error:.1f}%"
+        )
 
 
 def test_material_lookup():

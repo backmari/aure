@@ -2,6 +2,8 @@
   <img src="docs/logo.svg" alt="AuRE" width="360">
 </p>
 
+[![DOI](https://zenodo.org/badge/1154042964.svg)](https://doi.org/10.5281/zenodo.18940694)
+
 <h1 align="center">Automated Reflectivity Evaluator</h1>
 
 AuRE is an intelligent agent for analyzing neutron and X-ray reflectivity data.

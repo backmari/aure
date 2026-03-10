@@ -4,7 +4,6 @@ Validation report generator.
 Produces a markdown report comparing aure outputs to reference models.
 """
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -15,7 +14,6 @@ from .comparator import (
     compare_all,
     compute_aggregate,
 )
-from .inventory import DATA_DIR
 
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -30,16 +28,16 @@ def generate_report(
     lines: list[str] = []
     w = lines.append
 
-    w(f"# Validation Report")
-    w(f"")
+    w("# Validation Report")
+    w("")
     w(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    w(f"")
+    w("")
 
     # ── Summary table ────────────────────────────────────────
     w("## Summary")
     w("")
-    w(f"| Metric | Value |")
-    w(f"|--------|-------|")
+    w("| Metric | Value |")
+    w("|--------|-------|")
     w(f"| Datasets with results | {stats.n_with_results} |")
     w(f"| Layer count match | {stats.n_layer_match}/{stats.n_with_results} |")
     if stats.mean_chi2 is not None:

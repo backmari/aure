@@ -16,10 +16,10 @@ Usage:
     # Python API
     from aure import run_analysis
     result = run_analysis("data.dat", "100 nm polystyrene on silicon")
-    
+
     # CLI
     python -m aure.cli analyze data.dat "100 nm polystyrene on silicon"
-    
+
     # MCP Server
     python -m aure.cli mcp-server
 """
@@ -27,14 +27,16 @@ Usage:
 import warnings
 
 # Suppress compatibility warnings for Python 3.14+
-warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality isn't compatible")
+warnings.filterwarnings(
+    "ignore", message="Core Pydantic V1 functionality isn't compatible"
+)
 
 from .state import ReflectivityState, create_initial_state
 from .workflow import create_workflow, run_analysis
 
 __all__ = [
-    'ReflectivityState', 
-    'create_initial_state',
-    'create_workflow',
-    'run_analysis',
+    "ReflectivityState",
+    "create_initial_state",
+    "create_workflow",
+    "run_analysis",
 ]

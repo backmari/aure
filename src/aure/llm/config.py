@@ -90,6 +90,7 @@ def _alcf_token_available(config: dict) -> bool:
     # Suppress noisy warnings that _get_token emits on each fallback path.
     try:
         from .providers.alcf import _get_token
+
         alcf_logger = logging.getLogger("aure.llm.providers.alcf")
         old_level = alcf_logger.level
         alcf_logger.setLevel(logging.CRITICAL)

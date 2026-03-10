@@ -13,7 +13,6 @@ Covers the features added in the interactive-parameter-editor session:
 """
 
 import json
-import os
 import threading
 from pathlib import Path
 from unittest import mock
@@ -40,9 +39,7 @@ def _make_state(output_dir: str, data_file: str = "/tmp/test.dat") -> dict:
         "current_chi2": 1.45,
         "best_chi2": 1.45,
         "current_model": (
-            "# model script\n"
-            "copper_thickness = 500\n"
-            "copper_thickness.range(400, 600)\n"
+            "# model script\ncopper_thickness = 500\ncopper_thickness.range(400, 600)\n"
         ),
         "best_model": "# model script",
         "workflow_complete": True,
@@ -361,7 +358,6 @@ class TestRestartWithOverrides:
 
     @patch("aure.workflow.runner.run_workflow_with_checkpoints")
     def test_restart_applies_parameter_overrides(self, mock_run, client, output_dir):
-        from aure.state import create_initial_state
 
         mock_run.return_value = _make_state(str(output_dir))
 
@@ -457,9 +453,7 @@ class TestIsaacUserContext:
                 "aure.exporters.isaac._generate_context_description",
                 return_value=llm_context,
             ):
-                result = exporter.export(
-                    output_dir, state, run_info, user_context=user_ctx
-                )
+                exporter.export(output_dir, state, run_info, user_context=user_ctx)
 
             context_file = output_dir / "ai-ready-data" / "context.txt"
             assert context_file.is_file()
@@ -603,9 +597,7 @@ problem = MockProblem()
         )
 
         Q = np.array([0.01, 0.02, 0.03])
-        result = _execute_model_file(
-            model_script, Q, compute_reflectivity=True
-        )
+        result = _execute_model_file(model_script, Q, compute_reflectivity=True)
 
         assert result is not None
         assert result["Q_fit"] is not None

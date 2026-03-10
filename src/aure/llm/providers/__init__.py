@@ -14,14 +14,14 @@ dropping a new ``<name>.py`` in this package and registering it in
 
 from typing import Optional
 
-from ..config import get_llm_config, get_llm_timeout
+from ..config import get_llm_config
 
 # Lazy registry: provider name → module path (relative to this package)
 _PROVIDERS: dict[str, str] = {
     "openai": ".openai",
     "gemini": ".gemini",
-    "alcf":   ".alcf",
-    "local":  ".local",
+    "alcf": ".alcf",
+    "local": ".local",
 }
 
 
@@ -51,6 +51,7 @@ def get_llm(temperature: Optional[float] = None):
     # Import the provider module lazily so we don't pull in heavy SDKs
     # until they are actually needed.
     import importlib
+
     mod = importlib.import_module(module_path, package=__package__)
 
     temp = temperature if temperature is not None else config["temperature"]

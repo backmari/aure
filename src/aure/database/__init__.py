@@ -12,12 +12,12 @@ from .materials import (
 )
 
 __all__ = [
-    'Material',
-    'DENSITIES',
-    'ALIASES',
-    'compute_sld',
-    'resolve_formula',
-    'get_density',
-    'lookup_material',
-    'get_sld',
+    "Material",
+    "DENSITIES",
+    "ALIASES",
+    "compute_sld",
+    "resolve_formula",
+    "get_density",
+    "lookup_material",
+    "get_sld",
 ]

@@ -341,10 +341,10 @@ def check_llm(output_json: bool, no_test: bool, fix: bool):
             click.echo("      export ALCF_ACCESS_TOKEN=<your-token>")
         elif config["provider"] in ("openai", "gemini") and not has_key:
             click.echo("    Set an API key:")
-            click.echo(f"      export LLM_API_KEY=<your-key>")
-            click.echo(f"    or add to .env:")
+            click.echo("      export LLM_API_KEY=<your-key>")
+            click.echo("    or add to .env:")
             click.echo(f"      LLM_PROVIDER={config['provider']}")
-            click.echo(f"      LLM_API_KEY=<your-key>")
+            click.echo("      LLM_API_KEY=<your-key>")
         elif config["provider"] == "local" and not config.get("base_url"):
             click.echo("    Set a base URL for local provider:")
             click.echo("      export LLM_BASE_URL=http://localhost:11434/v1")
@@ -1262,7 +1262,6 @@ def plot_results(
         python -m aure.cli plot-results /path/to/results -s results.pdf --no-show -w /path/to/workspace
     """
     from pathlib import Path
-    import os
     from .workflow import CheckpointManager
 
     try:

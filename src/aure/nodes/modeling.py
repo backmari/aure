@@ -684,7 +684,7 @@ def _fix_sld_attr_access(script: str) -> str:
     def _rewrite(m: re.Match) -> str:
         indent = m.group(1)
         var = m.group(2)
-        mat_prefix = m.group(3)  # 'material.' or ''
+        # mat_prefix = m.group(3)  # 'material.' or ''
         attr = m.group(4)
         rest = m.group(5)
         idx = var_to_idx[var]

@@ -51,7 +51,7 @@ omit = ["src/aure/__pycache__/*"]
 show_missing = true
 skip_empty = true
 exclude_lines = [
-    "pragma: no cover",
-    "if __name__ == .__main__.",
-    "if TYPE_CHECKING:",
+  "pragma: no cover",
+  "if __name__ == .__main__.",
+  "if TYPE_CHECKING:",
 ]

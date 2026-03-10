@@ -734,7 +734,9 @@ def api_restart_analysis():
             latest["bounds"] = bounds
 
     # Update current_model script with overrides
-    if (parameter_overrides or bounds_overrides) and restarted_state.get("current_model"):
+    if (parameter_overrides or bounds_overrides) and restarted_state.get(
+        "current_model"
+    ):
         restarted_state["current_model"] = _apply_overrides_to_model_script(
             restarted_state["current_model"],
             parameter_overrides or {},

@@ -58,6 +58,7 @@ def _do_invoke(llm, prompt):
     """Perform the actual LLM invocation."""
     if isinstance(prompt, str):
         from langchain_core.messages import HumanMessage
+
         return llm.invoke([HumanMessage(content=prompt)])
     return llm.invoke(prompt)
 

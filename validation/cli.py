@@ -20,7 +20,6 @@ diagnose    Detailed diagnostic: intake parse, ambient correction, initial
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 from pathlib import Path
@@ -28,13 +27,12 @@ from typing import List, Optional
 
 from .comparator import (
     RESULTS_DIR,
-    compare_all,
     compare_single,
     compute_aggregate,
     print_aggregate,
     print_comparison,
 )
-from .inventory import DATA_DIR, build_inventory
+from .inventory import build_inventory
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -222,7 +220,7 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
         if analysis.exists():
             state = json.load(open(analysis))["state"]
             ps = state.get("parsed_sample") or {}
-            print(f"\n--- ANALYSIS: corrected ambient ---")
+            print("\n--- ANALYSIS: corrected ambient ---")
             print(f"  ambient: {ps.get('ambient')}")
 
         # ── Initial model key lines ───────────────────────────
@@ -230,7 +228,7 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
         if modeling.exists():
             state = json.load(open(modeling))["state"]
             model = state.get("current_model", "")
-            print(f"\n--- INITIAL MODEL ---")
+            print("\n--- INITIAL MODEL ---")
             keywords = ("sld(", "sample =", "range", "intensity", "material")
             for i, line in enumerate(model.split("\n"), 1):
                 if line.strip() and any(k in line.strip().lower() for k in keywords):
@@ -238,7 +236,7 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
 
         # ── χ² progression ────────────────────────────────────
         checkpoints = sorted(cp_dir.glob("*.json"))
-        print(f"\n--- CHI2 PROGRESSION ---")
+        print("\n--- CHI2 PROGRESSION ---")
         for cp in checkpoints:
             d = json.load(open(cp))
             s = d.get("state", d)
@@ -263,7 +261,7 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
         lf = summary.get("last_fit") or {}
         params = lf.get("parameters") or {}
         if params:
-            print(f"\n--- FINAL PARAMS ---")
+            print("\n--- FINAL PARAMS ---")
             for k, v in params.items():
                 if isinstance(v, (int, float)):
                     print(f"  {k:45s}: {v:10.4f}")

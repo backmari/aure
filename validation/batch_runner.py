@@ -7,12 +7,10 @@ Results are saved to validation/results/<run>/.
 """
 
 import json
-import os
-import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -56,7 +54,7 @@ def run_single(
     try:
         result = run_analysis(
             data_file=str(ref.data_file),
-            sample_description=ref.context,   # full context as description
+            sample_description=ref.context,  # full context as description
             hypothesis=None,
             max_iterations=max_iterations,
             output_dir=str(output_dir),
@@ -151,6 +149,7 @@ def run_all(
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _save_state_summary(state: dict, path: Path) -> None:
     """Save a JSON-serialisable subset of the workflow state."""
     subset = {
@@ -187,7 +186,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run validation batch")
     parser.add_argument("--runs", nargs="*", help="Specific run numbers to process")
-    parser.add_argument("--max-iter", type=int, default=5, help="Max refinement iterations")
+    parser.add_argument(
+        "--max-iter", type=int, default=5, help="Max refinement iterations"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
